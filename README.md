@@ -1,6 +1,6 @@
 # The Daily Web - Stage 0
 
-This repository contains the shared foundation for the project before development is divided among the team: an Express server, a MongoDB connection through Mongoose, an MVC structure, three models, and the initial routes. A complete news system, user authentication, and CRUD operations have not been implemented yet.
+This repository contains the shared foundation for the project before development is divided among the team: an Express server, a MongoDB connection through Mongoose, an MVC structure, five models, and the initial routes. A complete news system, user authentication, and CRUD operations have not been implemented yet.
 
 ## Installation and startup
 
@@ -30,6 +30,8 @@ config/constants.js                Role names and article statuses
 models/User.js                     User schema
 models/Article.js                  Article schema
 models/Comment.js                  Comment schema
+models/ViewStatistic.js            View counts per article, minute, and publication
+models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
 views/index.ejs                    Basic server-rendered landing page
@@ -46,12 +48,24 @@ Mongoose creates `_id`, `createdAt`, and `updatedAt` for every model. The follow
 | User | `username` is required, unique, and stored in lowercase; `displayName` is required; `passwordHash` is required and excluded from normal queries and JSON output; `role` defaults to `guest` |
 | Article | `author` references User; `draft` contains work in progress; `published` contains the approved snapshot or null; `status`; `editorNote`; `publishedAt` records the first publication; `lastPublishedAt` records the most recent approval |
 | Comment | `article` references Article; `author` optionally references User and is null for a guest; `displayName` is required; `body` is required and limited to 2,000 characters |
+| ViewStatistic | Required `article` and `publication` references; `minute` is a UTC minute boundary; `count` is a nonnegative safe integer, defaulting to zero |
+| PublicationEvent | Required `article` and `editor` references; required `publishedAt` event time; `kind` is `initial` or `update` |
 
 Both `draft` and `published` contain `title`, `summary`, `body`, `category`, and `imageUrl`. A draft may be incomplete to support automatic saving. The future submission controller must verify that all required content is complete. Public readers will receive only the `published` snapshot, so editing a draft does not change approved content.
 
 Article statuses are `draft`, `pending`, `published`, and `returned`. The schema restricts values to these statuses. Controllers will enforce permissions and valid status transitions. Editing a published article keeps the approved snapshot available while opening a new review cycle for the draft.
 
 Mongoose does not verify that referenced documents exist. Future controllers are responsible for validating references, content completeness, status transitions, and copying an approved draft into the published snapshot. The unique username index also requires the controller to handle duplicate-key errors.
+
+## Analytics storage contract
+
+These schemas provide the Stage 0 storage foundation for requirements 12 and 14. Collection and approval controllers, analytics endpoints, and graphs remain future work.
+
+Store a separate PublicationEvent for the initial publication and every approved update. Its `publishedAt` must be the server-recorded publication time, not the time a draft was edited. The article/time index supports fetching all graph markers without growing an array inside Article. Article's `publishedAt` and `lastPublishedAt` remain convenient first/latest timestamps; they do not replace the event history. Events store publication metadata, not archived article content.
+
+Store view counts in one-minute buckets rather than one document per visit. Compute `minute` from the server visit time with `new Date(Math.floor(visitTime.getTime() / 60000) * 60000)`. Each bucket references the publication that the reader actually received, so updates within a minute have separate counts. The unique index on article, minute, and publication prevents duplicate buckets and supports article/time-range queries. Summing their counts gives views over time.
+
+Future view recording must use an atomic `$inc` with an upsert, rather than reading and saving a counter, and handle duplicate-key races when concurrently creating a bucket. Future approval logic must keep the public snapshot, article timestamps, and publication event consistent and avoid duplicate events on retries. Controllers must validate referenced records, verify that the publication belongs to the article, enforce Editor authorization for publication, and clean up associated statistics/events when deleting an article. Schema validation does not enforce these rules or automatically record visits. Anonymous viewed/not-viewed tracking is a separate future concern; these aggregate counts contain no device identifiers.
 
 ## Agreed roles
 
@@ -79,7 +93,7 @@ The reserved endpoints currently return HTTP 501 with `NOT_IMPLEMENTED`. An unkn
 npm test
 ```
 
-The tests cover schema validation, separation of draft and published content, omission of the password field from JSON, page rendering, foundation routes, and malformed JSON handling. They do not test a real database connection. To test the complete startup path, run `npm start` with MongoDB available and confirm that `/health` returns HTTP 200.
+The tests cover schema validation, analytics buckets and publication markers, separation of draft and published content, omission of the password field from JSON, page rendering, foundation routes, and malformed JSON handling. They do not test a real database connection, database index enforcement, or concurrent view recording. To test the complete startup path, run `npm start` with MongoDB available and confirm that `/health` returns HTTP 200.
 
 ## Git and teamwork
 
@@ -87,4 +101,4 @@ The local project has not yet been connected to the team's existing GitHub repos
 
 ## Work after Stage 0
 
-The complete project requirements also include a view analytics model, persistent authentication, authorization, CRUD operations, the editorial approval workflow, automatic saving, comment rate limiting, a user interface, and a weather service integration. These components are not part of the current stage. In particular, an unlimited view history should not be stored as an array inside Article; the analytics model will be designed separately at the appropriate stage.
+The complete project requirements also include view collection and analytics graphs, persistent authentication, authorization, CRUD operations, the editorial approval workflow, automatic saving, comment rate limiting, a user interface, and a weather service integration. These behaviors are not part of the current stage. View statistics and publication history schemas are ready for those future implementations.
