@@ -1,6 +1,6 @@
-# The Daily Web - Stage 0
+# The Daily Web
 
-This repository contains the shared foundation for the project before development is divided among the team: an Express server, a MongoDB connection through Mongoose, an MVC structure, five models, and the initial routes. A complete news system, user authentication, and CRUD operations have not been implemented yet.
+This repository contains an Express and Mongoose MVC foundation and the first authentication step. Reporters and Editors can sign in with a username and password, stay signed in across server restarts, and access role-protected starter areas. News and article CRUD features are still in development.
 
 ## Installation and startup
 
@@ -21,6 +21,19 @@ npm start
 
 After the database connection succeeds, the server listens on `http://localhost:3000`. A different `PORT` can be configured in `.env`. If the initial database connection fails, the process exits with an error instead of appearing healthy. `GET /health` returns HTTP 200 when the database is connected and HTTP 503 when it is unavailable.
 
+### Create the first account
+
+Run this in PowerShell after configuring MongoDB. The password is read privately and passed to the local process through a temporary environment variable; it is never written to the repository.
+
+```powershell
+$secret = Read-Host 'New password (8-128 characters)' -AsSecureString
+$env:NEW_USER_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
+try { npm run create-user -- reporter1 'Reporter One' reporter }
+finally { Remove-Item Env:NEW_USER_PASSWORD }
+```
+
+Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter` and Editors to `/editor`; those pages are protected starter areas for future article tools. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
+
 ## Project structure
 
 ```text
@@ -28,15 +41,22 @@ app.js                             Express setup, database connection, and serve
 config/database.js                 MongoDB connection
 config/constants.js                Role names and article statuses
 models/User.js                     User schema
+models/Session.js                  Persistent, expiring login sessions
 models/Article.js                  Article schema
 models/Comment.js                  Comment schema
 models/ViewStatistic.js            View counts per article, minute, and publication
 models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
+middleware/auth.js                 Cookie session loading and role checks
+controllers/authController.js      Login, logout, account, and starter area flow
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
 views/index.ejs                    Basic server-rendered landing page
+views/login.ejs                    Login form
+views/workArea.ejs                 Protected starter areas
+scripts/createUser.js              Local account creation
 public/                            CSS, client-side JavaScript, and image files
 test/foundation.test.js            Foundation tests that do not require a running database
+test/auth.test.js                  Password and session flow tests with a simulated database
 ```
 
 ## Shared model contract
@@ -46,6 +66,7 @@ Mongoose creates `_id`, `createdAt`, and `updatedAt` for every model. The follow
 | Model | Fields |
 | --- | --- |
 | User | `username` is required, unique, and stored in lowercase; `displayName` is required; `passwordHash` is required and excluded from normal queries and JSON output; `role` defaults to `guest` |
+| Session | A SHA-256 hash of a random cookie token, a User reference, and an expiry time; MongoDB removes expired sessions with a TTL index |
 | Article | `author` references User; `draft` contains work in progress; `published` contains the approved snapshot or null; `status`; `editorNote`; `publishedAt` records the first publication; `lastPublishedAt` records the most recent approval |
 | Comment | `article` references Article; `author` optionally references User and is null for a guest; `displayName` is required; `body` is required and limited to 2,000 characters |
 | ViewStatistic | Required `article` and `publication` references; `minute` is a UTC minute boundary; `count` is a nonnegative safe integer, defaulting to zero |
@@ -75,17 +96,18 @@ Future view recording must use an atomic `$inc` with an upsert, rather than read
 | `reporter` | Create articles, edit owned articles, and submit them for approval |
 | `editor` | Manage all articles, approve publication, and return articles for corrections |
 
-An anonymous guest does not require a User document in the database. Authentication and authorization enforcement have not been implemented yet, and the routes do not currently modify data. The future authentication implementation must derive the role from the authenticated server-side user, hash passwords, and persist sessions across server restarts. Never copy `role` from a request body or HTTP header, and never store a plaintext password in `passwordHash`.
+An anonymous guest does not require a User document in the database. Passwords are hashed with Node's built-in scrypt and a random salt. The browser receives an HttpOnly, SameSite=Lax cookie containing a random session token; MongoDB stores only its hash. Sessions expire after seven days, and logout deletes the saved session. Role checks use the User loaded from MongoDB, never a browser-provided role. Article and comment authorization will be added when those routes are implemented.
 
 ## Route contract
 
 | Route | Reserved operations |
 | --- | --- |
-| `/auth` | `GET /`, `POST /login`, `POST /logout`, `GET /me` |
+| `/auth` | `GET /` login page, `POST /login`, `POST /logout`, `GET /me` |
+| `/reporter`, `/editor` | Protected starter areas for the matching role |
 | `/articles` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 | `/comments` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 
-The reserved endpoints currently return HTTP 501 with `NOT_IMPLEMENTED`. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400. This contract does not yet define the complete article review workflow API.
+Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. The article and comment endpoints still return HTTP 501 with `NOT_IMPLEMENTED`. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400. This contract does not yet define the complete article review workflow API.
 
 ## Tests
 
@@ -93,12 +115,12 @@ The reserved endpoints currently return HTTP 501 with `NOT_IMPLEMENTED`. An unkn
 npm test
 ```
 
-The tests cover schema validation, analytics buckets and publication markers, separation of draft and published content, omission of the password field from JSON, page rendering, foundation routes, and malformed JSON handling. They do not test a real database connection, database index enforcement, or concurrent view recording. To test the complete startup path, run `npm start` with MongoDB available and confirm that `/health` returns HTTP 200.
+The tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. They do not test a real database connection, database index enforcement, or concurrent view recording. To test the complete startup path, run `npm start` with MongoDB available, create a Reporter and Editor, and confirm each can log in, survives a server restart, and loses access after logout.
 
 ## Git and teamwork
 
 The local project has not yet been connected to the team's existing GitHub repository. The repository is public, and every team member should be added as a collaborator. `.gitignore` is ready to exclude secrets, dependencies, and temporary files. After cloning the existing repository and transferring this foundation into it, each team member should work on a separate branch and merge changes through Pull Requests.
 
-## Work after Stage 0
+## Remaining work
 
-The complete project requirements also include view collection and analytics graphs, persistent authentication, authorization, CRUD operations, the editorial approval workflow, automatic saving, comment rate limiting, a user interface, and a weather service integration. These behaviors are not part of the current stage. View statistics and publication history schemas are ready for those future implementations.
+The remaining project requirements include view collection and analytics graphs, article and comment CRUD, the editorial approval workflow, automatic saving, comment rate limiting, the public news interface, and weather integration. View statistics and publication history schemas are ready for those future implementations.

@@ -7,7 +7,8 @@ const Article = require('../models/Article');
 const Comment = require('../models/Comment');
 
 test('models reject invalid roles, statuses and empty comments; drafts stay separate', async () => {
-  const user = new User({ username: ' Writer ', displayName: 'Writer', passwordHash: 'test-only-hash' });
+  const user = new User({ username: ' Writer ', displayName: 'Writer' });
+  await user.setPassword('test-password');
   await user.validate();
   assert.equal(user.username, 'writer');
   assert.equal(user.role, 'guest');
@@ -32,7 +33,8 @@ test('HTTP foundation renders, exposes placeholders and handles invalid requests
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.match(await (await fetch(base)).text(), /The Daily Web/);
   assert.equal((await fetch(`${base}/health`)).status, 503);
-  for (const route of ['/auth', '/articles', '/comments']) {
+  assert.equal((await fetch(`${base}/auth`)).status, 200);
+  for (const route of ['/articles', '/comments']) {
     assert.equal((await fetch(base + route)).status, 501);
   }
   assert.equal((await fetch(`${base}/missing`)).status, 404);
