@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> | The Daily Web</title>
+  <link rel="stylesheet" href="/auth.css">
+</head>
+<body>
+  <main class="card">
+    <h1><%= title %></h1>
+    <p>Signed in as <%= user.displayName %> (<%= user.role %>).</p>
+    <p>The article tools for this area are being built in the next steps.</p>
+    <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
+    <p><a href="/">Back to home</a></p>
+  </main>
+</body>
+</html>

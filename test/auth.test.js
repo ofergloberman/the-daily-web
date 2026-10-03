@@ -1,0 +1,85 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
+const { app } = require('../app');
+const User = require('../models/User');
+const Session = require('../models/Session');
+const { hashToken, readSessionToken } = require('../middleware/auth');
+
+async function listen() {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  return { server, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+test('passwords use salted, one-way hashes and never appear in JSON', async () => {
+  const first = new User({ username: 'reporter', displayName: 'Reporter', role: 'reporter' });
+  const second = new User({ username: 'editor', displayName: 'Editor', role: 'editor' });
+  await first.setPassword('correct-password');
+  await second.setPassword('correct-password');
+  assert.notEqual(first.passwordHash, second.passwordHash);
+  assert.equal(first.passwordHash.includes('correct-password'), false);
+  assert.equal(await first.verifyPassword('correct-password'), true);
+  assert.equal(await first.verifyPassword('wrong-password'), false);
+  assert.equal(first.toJSON().passwordHash, undefined);
+  await assert.rejects(first.setPassword('short'));
+  first.passwordHash = 'plaintext';
+  await assert.rejects(first.validate(), error => Boolean(error.errors.passwordHash));
+});
+
+test('login, role checks, restart continuity, and logout', async t => {
+  const reporter = new User({ _id: new mongoose.Types.ObjectId(), username: 'reporter', displayName: 'Reporter', role: 'reporter' });
+  const editor = new User({ _id: new mongoose.Types.ObjectId(), username: 'editor', displayName: 'Editor', role: 'editor' });
+  await reporter.setPassword('correct-password');
+  await editor.setPassword('editor-password');
+  const sessions = new Map();
+  t.mock.method(User, 'findOne', ({ username }) => ({ select: async () => ({ reporter, editor })[username] || null }));
+  t.mock.method(Session, 'create', async data => { sessions.set(data.tokenHash, data); return data; });
+  t.mock.method(Session, 'findOne', ({ tokenHash, expiresAt }) => ({
+    populate: async () => {
+      const saved = sessions.get(tokenHash);
+      return saved && saved.expiresAt > expiresAt.$gt ? { user: saved.user.equals(reporter._id) ? reporter : editor } : null;
+    }
+  }));
+  t.mock.method(Session, 'deleteOne', async ({ tokenHash }) => { sessions.delete(tokenHash); });
+
+  let running = await listen();
+  t.after(async () => { if (running.server.listening) await new Promise(resolve => running.server.close(resolve)); });
+  const post = (url, body, cookie) => fetch(running.base + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body)
+  });
+
+  assert.equal((await fetch(running.base + '/auth/me')).status, 401);
+  assert.equal((await fetch(running.base + '/reporter')).status, 401);
+  assert.equal((await post('/auth/login', { username: 'reporter', password: 'wrong-password' })).status, 401);
+  assert.equal((await post('/auth/login', { username: 'reporter', password: '' })).status, 400);
+  assert.equal(sessions.size, 0);
+
+  const login = await post('/auth/login', { username: ' REPORTER ', password: 'correct-password', role: 'editor' });
+  assert.equal(login.status, 200);
+  assert.equal((await login.json()).user.role, 'reporter');
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const token = readSessionToken(cookie);
+  assert.ok(token);
+  assert.equal(sessions.has(hashToken(token)), true);
+  assert.equal(sessions.has(token), false);
+  assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: cookie } })).status, 200);
+  assert.equal((await fetch(running.base + '/reporter', { headers: { Cookie: cookie } })).status, 200);
+  assert.equal((await fetch(running.base + '/editor', { headers: { Cookie: cookie } })).status, 403);
+
+  await new Promise(resolve => running.server.close(resolve));
+  running = await listen();
+  assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: cookie } })).status, 200);
+  assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: 'wd_session=invalid' } })).status, 401);
+  const logout = await fetch(running.base + '/auth/logout', { method: 'POST', headers: { Cookie: cookie } });
+  assert.equal(logout.status, 204);
+  assert.equal(sessions.size, 0);
+  assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: cookie } })).status, 401);
+
+  const editorLogin = await post('/auth/login', { username: 'editor', password: 'editor-password' });
+  assert.equal(editorLogin.status, 200);
+  assert.equal((await editorLogin.json()).redirectTo, '/editor');
+  const editorCookie = editorLogin.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(running.base + '/editor', { headers: { Cookie: editorCookie } })).status, 200);
+  assert.equal((await fetch(running.base + '/reporter', { headers: { Cookie: editorCookie } })).status, 403);
+});

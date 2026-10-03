@@ -2,6 +2,8 @@ const path = require('node:path');
 const express = require('express');
 const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
+const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
+const { reporterArea, editorArea } = require('./controllers/authController');
 
 const app = express();
 app.disable('x-powered-by');
@@ -10,12 +12,15 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (_req, res) => res.render('index'));
 app.get('/health', (_req, res) => {
   const connected = mongoose.connection.readyState === 1;
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
+app.use(loadUser);
+app.get('/', (_req, res) => res.render('index'));
 app.use('/auth', require('./routes/auth'));
+app.get('/reporter', requireReporter, reporterArea);
+app.get('/editor', requireEditor, editorArea);
 app.use('/articles', require('./routes/articles'));
 app.use('/comments', require('./routes/comments'));
 app.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND' }));

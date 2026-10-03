@@ -1,8 +1,9 @@
 const router = require('express').Router();
-const { notImplemented } = require('../controllers/scaffoldController');
+const auth = require('../controllers/authController');
+const { requireAuth } = require('../middleware/auth');
 
-router.get('/', notImplemented);
-router.post('/login', notImplemented);
-router.post('/logout', notImplemented);
-router.get('/me', notImplemented);
+router.get('/', auth.showLogin);
+router.post('/login', auth.login);
+router.post('/logout', auth.logout);
+router.get('/me', requireAuth, auth.me);
 module.exports = router;
