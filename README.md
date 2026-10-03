@@ -1,6 +1,6 @@
 # The Daily Web
 
-This repository contains an Express and Mongoose MVC foundation and the first authentication step. Reporters and Editors can sign in with a username and password, stay signed in across server restarts, and access role-protected starter areas. News and article CRUD features are still in development.
+This repository contains an Express and Mongoose MVC foundation, login sessions, and a Reporter draft workspace. Reporters can sign in, create and edit their own drafts, and save changes to MongoDB while writing. Editorial review and public article pages are still in development.
 
 ## Installation and startup
 
@@ -32,7 +32,7 @@ try { npm run create-user -- reporter1 'Reporter One' reporter }
 finally { Remove-Item Env:NEW_USER_PASSWORD }
 ```
 
-Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter` and Editors to `/editor`; those pages are protected starter areas for future article tools. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
+Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, which is still a protected starter area. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
 
 ## Project structure
 
@@ -47,16 +47,23 @@ models/Comment.js                  Comment schema
 models/ViewStatistic.js            View counts per article, minute, and publication
 models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
+routes/reporter.js                  Reporter dashboard and draft routes
 middleware/auth.js                 Cookie session loading and role checks
-controllers/authController.js      Login, logout, account, and starter area flow
+controllers/authController.js      Login, logout, account, and Editor starter area flow
+controllers/reporterController.js  Reporter draft creation, listing, and autosave
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
 views/index.ejs                    Basic server-rendered landing page
 views/login.ejs                    Login form
 views/workArea.ejs                 Protected starter areas
+views/reporterDashboard.ejs        Reporter article list
+views/reporterEditor.ejs           Draft editor
+public/reporter-autosave.js        Browser-side AJAX autosave
+public/reporter.css                Reporter workspace styles
 scripts/createUser.js              Local account creation
 public/                            CSS, client-side JavaScript, and image files
 test/foundation.test.js            Foundation tests that do not require a running database
 test/auth.test.js                  Password and session flow tests with a simulated database
+test/reporter.test.js              Reporter draft route and authorization tests
 ```
 
 ## Shared model contract
@@ -103,11 +110,14 @@ An anonymous guest does not require a User document in the database. Passwords a
 | Route | Reserved operations |
 | --- | --- |
 | `/auth` | `GET /` login page, `POST /login`, `POST /logout`, `GET /me` |
-| `/reporter`, `/editor` | Protected starter areas for the matching role |
+| `/reporter`, `/editor` | Reporter workspace and protected Editor starter area |
+| `/reporter/articles` | `GET` paginated own articles, `POST` create a private draft |
+| `/reporter/articles/:id/edit` | `GET` edit an owned draft |
+| `/reporter/articles/:id/draft` | `PATCH` save the five working content fields |
 | `/articles` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 | `/comments` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 
-Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. The article and comment endpoints still return HTTP 501 with `NOT_IMPLEMENTED`. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400. This contract does not yet define the complete article review workflow API.
+Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. Reporter routes require the Reporter role; draft reads and updates require ownership, and updates require Draft status. The article and comment endpoints still return HTTP 501 with `NOT_IMPLEMENTED`. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400. See [README.reporter-draft-foundation.md](README.reporter-draft-foundation.md) for the draft workflow.
 
 ## Tests
 
@@ -123,4 +133,4 @@ The local project has not yet been connected to the team's existing GitHub repos
 
 ## Remaining work
 
-The remaining project requirements include view collection and analytics graphs, article and comment CRUD, the editorial approval workflow, automatic saving, comment rate limiting, the public news interface, and weather integration. View statistics and publication history schemas are ready for those future implementations.
+The remaining project requirements include view collection and analytics graphs, article submission and editorial approval, published update versioning, comments, comment rate limiting, the public news interface, and weather integration. View statistics and publication history schemas are ready for those future implementations.

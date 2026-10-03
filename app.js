@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
-const { reporterArea, editorArea } = require('./controllers/authController');
+const { editorArea } = require('./controllers/authController');
 
 const app = express();
 app.disable('x-powered-by');
@@ -19,7 +19,7 @@ app.get('/health', (_req, res) => {
 app.use(loadUser);
 app.get('/', (_req, res) => res.render('index'));
 app.use('/auth', require('./routes/auth'));
-app.get('/reporter', requireReporter, reporterArea);
+app.use('/reporter', requireReporter, require('./routes/reporter'));
 app.get('/editor', requireEditor, editorArea);
 app.use('/articles', require('./routes/articles'));
 app.use('/comments', require('./routes/comments'));
