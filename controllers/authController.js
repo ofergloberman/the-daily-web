@@ -61,12 +61,8 @@ function me(req, res) {
   res.json({ user: publicUser(req.user) });
 }
 
-function reporterArea(req, res) {
-  res.render('workArea', { user: publicUser(req.user), title: 'Reporter work area' });
-}
-
 function editorArea(req, res) {
   res.render('workArea', { user: publicUser(req.user), title: 'Editor management area' });
 }
 
-module.exports = { showLogin, login, logout, me, reporterArea, editorArea };
+module.exports = { showLogin, login, logout, me, editorArea };

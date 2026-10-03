@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reporter workspace | The Daily Web</title>
+  <link rel="stylesheet" href="/reporter.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">The Daily Web</a>
+    <div class="header-actions"><span><%= user.displayName %></span><form method="post" action="/auth/logout"><button class="text-button" type="submit">Sign out</button></form></div>
+  </header>
+  <main class="workspace">
+    <div class="page-intro">
+      <div><p class="section-label">Reporter workspace</p><h1>Your articles</h1><p class="intro-copy">Pick up a draft or start a new story. Your draft work stays private until it enters review.</p></div>
+      <form method="post" action="/reporter/articles"><button class="primary-button" type="submit">Create new article</button></form>
+    </div>
+    <% if (!articles.length) { %>
+      <section class="empty-state"><h2><%= page === 1 ? 'No articles yet' : 'No more articles' %></h2><p><%= page === 1 ? 'Create an article to begin writing. Your changes will save as you work.' : 'Return to the previous page to see your articles.' %></p><% if (page > 1) { %><a href="/reporter?page=<%= page - 1 %>">Previous page</a><% } %></section>
+    <% } else { %>
+      <section aria-labelledby="article-list-title">
+        <div class="list-heading"><h2 id="article-list-title">Article list</h2><span>Page <%= page %></span></div>
+        <div class="article-list">
+          <% articles.forEach(article => { %>
+            <article class="article-row">
+              <div class="article-details">
+                <h3><%= article.draft?.title || 'Untitled article' %></h3>
+                <p>Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= article.updatedAt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) %></time></p>
+                <% if (article.status === 'returned' && article.editorNote) { %><p class="editor-note">Editor note: <%= article.editorNote %></p><% } %>
+              </div>
+              <div class="article-action"><span class="status status-<%= article.status %>"><%= { draft: 'Draft', pending: 'Pending review', published: 'Published', returned: 'Returned' }[article.status] || article.status %></span>
+                <% if (article.status === 'draft') { %><a href="/reporter/articles/<%= article._id %>/edit">Continue writing</a><% } %>
+              </div>
+            </article>
+          <% }) %>
+        </div>
+        <nav class="page-nav" aria-label="Article pages">
+          <% if (page > 1) { %><a href="/reporter?page=<%= page - 1 %>">Previous page</a><% } %>
+          <% if (hasNext) { %><a href="/reporter?page=<%= page + 1 %>">Next page</a><% } %>
+        </nav>
+      </section>
+    <% } %>
+  </main>
+</body>
+</html>

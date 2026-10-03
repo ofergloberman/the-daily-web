@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { app } = require('../app');
 const User = require('../models/User');
 const Session = require('../models/Session');
+const Article = require('../models/Article');
 const { hashToken, readSessionToken } = require('../middleware/auth');
 
 async function listen() {
@@ -42,6 +43,10 @@ test('login, role checks, restart continuity, and logout', async t => {
     }
   }));
   t.mock.method(Session, 'deleteOne', async ({ tokenHash }) => { sessions.delete(tokenHash); });
+  t.mock.method(Article, 'find', () => ({
+    select() { return this; }, sort() { return this; }, skip() { return this; }, limit() { return this; },
+    async lean() { return []; }
+  }));
 
   let running = await listen();
   t.after(async () => { if (running.server.listening) await new Promise(resolve => running.server.close(resolve)); });
