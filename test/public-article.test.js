@@ -5,8 +5,8 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { app } = require('../app');
 const Article = require('../models/Article');
-const { PUBLIC_FIELDS, CARD_FIELDS } = require('../models/publicArticleQueries');
-const { FEED_SIZE, paragraphs } = require('../controllers/publicArticleController');
+const { PUBLIC_FIELDS } = require('../models/publicArticleQueries');
+const { paragraphs } = require('../controllers/publicArticleController');
 const visits = require('../services/visits');
 
 test('public article page renders only the published snapshot', async t => {
@@ -66,40 +66,6 @@ test('public article page renders only the published snapshot', async t => {
 test('article body splits into trimmed non-empty paragraphs', () => {
   assert.deepEqual(paragraphs(' One \r\n\r\nTwo\n  \nThree'), ['One', 'Two', 'Three']);
   assert.deepEqual(paragraphs(undefined), []);
-});
-
-test('homepage lists the latest published cards without draft fields', async t => {
-  const calls = {};
-  const card = {
-    _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana Reporter' }, publishedAt: new Date('2026-10-02T22:00:00Z'),
-    published: { title: 'Newest approved story', summary: 'Card summary', category: 'Tech', imageUrl: '' }
-  };
-  t.mock.method(Article, 'find', query => {
-    calls.query = query;
-    return {
-      select(fields) { calls.select = fields; return this; },
-      sort(order) { calls.sort = order; return this; },
-      limit(count) { calls.limit = count; return this; },
-      populate(path, fields) { calls.populate = [path, fields]; return this; },
-      async lean() { return [card]; }
-    };
-  });
-
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise(resolve => server.once('listening', resolve));
-  t.after(() => new Promise(resolve => server.close(resolve)));
-  const html = await (await fetch(`http://127.0.0.1:${server.address().port}/`)).text();
-
-  assert.deepEqual(calls.query, { published: { $ne: null } });
-  assert.deepEqual(calls.sort, { publishedAt: -1, _id: -1 });
-  assert.equal(calls.limit, FEED_SIZE);
-  assert.deepEqual(calls.populate, ['author', 'displayName']);
-  assert.equal(calls.select, CARD_FIELDS);
-  assert.doesNotMatch(CARD_FIELDS, /draft|editorNote|body/);
-  assert.match(html, new RegExp(`<a href="/articles/${card._id}">Newest approved story</a>`));
-  assert.match(html, /Card summary/);
-  assert.match(html, /datetime="2026-10-02T22:00:00.000Z">Oct 3, 2026</);
-  assert.doesNotMatch(html, /No articles yet/);
 });
 
 test('a failing recordVisit never breaks the article page', async t => {

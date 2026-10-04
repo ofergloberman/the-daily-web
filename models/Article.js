@@ -29,5 +29,6 @@ const articleSchema = new mongoose.Schema({
 articleSchema.index({ author: 1, status: 1 });
 articleSchema.index({ publishedAt: -1 });
 articleSchema.index({ totalViews: -1 });
+articleSchema.index({ 'published.category': 1, publishedAt: -1 });
 articleSchema.index({ 'published.title': 'text' });
 module.exports = mongoose.model('Article', articleSchema);
