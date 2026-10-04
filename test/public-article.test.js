@@ -13,7 +13,7 @@ test('public article page renders only the published snapshot', async t => {
     author: author._id, status: 'pending', editorNote: 'Secret editor note',
     published: { title: 'Approved headline', summary: 'Approved summary', body: 'First paragraph.\n\nSecond <b>paragraph</b>.', category: 'World' },
     draft: { title: 'Unapproved draft headline', body: 'Draft body text' },
-    publishedAt: new Date('2026-10-01T08:00:00Z')
+    publishedAt: new Date('2026-10-01T22:30:00Z')
   });
   const draftOnly = new Article({ author: author._id, draft: { title: 'Never published' } });
   const stored = [live, draftOnly];
@@ -49,7 +49,7 @@ test('public article page renders only the published snapshot', async t => {
   assert.match(html, /<p>First paragraph\.<\/p>/);
   assert.match(html, /Second &lt;b&gt;paragraph&lt;\/b&gt;\./);
   assert.match(html, /Dana Reporter/);
-  assert.match(html, /datetime="2026-10-01T08:00:00.000Z"/);
+  assert.match(html, /datetime="2026-10-01T22:30:00.000Z">October 2, 2026</);
   assert.doesNotMatch(html, /Unapproved draft headline|Draft body text|Secret editor note/);
   assert.ok(selections.every(fields => fields === PUBLIC_FIELDS));
   assert.doesNotMatch(PUBLIC_FIELDS, /draft|editorNote/);
@@ -69,7 +69,7 @@ test('article body splits into trimmed non-empty paragraphs', () => {
 test('homepage lists the latest published cards without draft fields', async t => {
   const calls = {};
   const card = {
-    _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana Reporter' }, publishedAt: new Date('2026-10-02T10:00:00Z'),
+    _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana Reporter' }, publishedAt: new Date('2026-10-02T22:00:00Z'),
     published: { title: 'Newest approved story', summary: 'Card summary', category: 'Tech', imageUrl: '' }
   };
   t.mock.method(Article, 'find', query => {
@@ -96,6 +96,7 @@ test('homepage lists the latest published cards without draft fields', async t =
   assert.doesNotMatch(CARD_FIELDS, /draft|editorNote|body/);
   assert.match(html, new RegExp(`<a href="/articles/${card._id}">Newest approved story</a>`));
   assert.match(html, /Card summary/);
+  assert.match(html, /datetime="2026-10-02T22:00:00.000Z">Oct 3, 2026</);
   assert.doesNotMatch(html, /No articles yet/);
 });
 
