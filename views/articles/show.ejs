@@ -12,7 +12,7 @@
           <% if (article.published.category) { %><p class="section-label"><%= article.published.category %></p><% } %>
           <h1><%= article.published.title || 'Untitled article' %></h1>
           <% if (article.published.summary) { %><p class="article-summary"><%= article.published.summary %></p><% } %>
-          <p class="article-meta">By <%= article.author?.displayName || 'Staff' %><% if (article.publishedAt) { %> &middot; <time datetime="<%= new Date(article.publishedAt).toISOString() %>"><%= new Date(article.publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Jerusalem' }) %></time><% } %></p>
+          <p class="article-meta">By <%= article.author?.displayName || 'Staff' %><% if (article.publishedAt) { %> &middot; <time datetime="<%= new Date(article.publishedAt).toISOString() %>"><%= formatDate(article.publishedAt, 'long') %></time><% } %></p>
         </header>
         <% if (article.published.imageUrl) { %><img class="article-image" src="<%= article.published.imageUrl %>" alt=""><% } %>
         <div class="article-body">

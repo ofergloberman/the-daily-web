@@ -5,6 +5,6 @@
     <% if (article.published.category) { %><p class="card-category"><%= article.published.category %></p><% } %>
     <h2 class="card-title"><a href="/articles/<%= article._id %>"><%= article.published.title || 'Untitled article' %></a></h2>
     <% if (article.published.summary) { %><p class="card-summary"><%= article.published.summary %></p><% } %>
-    <p class="card-meta"><%= article.author?.displayName || 'Staff' %><% if (article.publishedAt) { %> &middot; <time datetime="<%= new Date(article.publishedAt).toISOString() %>"><%= new Date(article.publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Jerusalem' }) %></time><% } %></p>
+    <p class="card-meta"><%= article.author?.displayName || 'Staff' %><% if (article.publishedAt) { %> &middot; <time datetime="<%= new Date(article.publishedAt).toISOString() %>"><%= formatDate(article.publishedAt) %></time><% } %></p>
   </div>
 </article>

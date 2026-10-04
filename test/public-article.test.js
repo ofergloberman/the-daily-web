@@ -1,3 +1,5 @@
+// Run as if hosted in UTC so a missing site timezone shows up on any developer machine.
+process.env.TZ = 'UTC';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
