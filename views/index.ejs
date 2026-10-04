@@ -8,16 +8,34 @@
   <div class="page-shell">
     <main class="page-main">
       <p class="section-label">Latest news</p>
-      <section class="article-list" id="feed" aria-live="polite">
-        <% if (!locals.articles || !articles.length) { %>
-          <div class="empty-state"><h2>No articles yet</h2><p>Published stories will appear here.</p></div>
+      <%# Works as a plain GET form without JS; feed.js upgrades it to AJAX. %>
+      <form class="feed-controls" id="feed-controls" method="get" action="/" role="search">
+        <div class="control"><label class="field-label" for="feed-q">Search titles</label><input class="field" id="feed-q" name="q" type="search" maxlength="100" value="<%= filters.q %>" placeholder="e.g. election"></div>
+        <div class="control"><label class="field-label" for="feed-category">Category</label>
+          <select class="field" id="feed-category" name="category">
+            <option value="">All categories</option>
+            <% categories.forEach(name => { %><option value="<%= name %>"<%= name === filters.category ? ' selected' : '' %>><%= name %></option><% }) %>
+          </select></div>
+        <div class="control"><label class="field-label" for="feed-sort">Sort by</label>
+          <select class="field" id="feed-sort" name="sort">
+            <% const sortLabels = { date: 'Newest first', popular: 'Most popular' }; sorts.forEach(name => { %><option value="<%= name %>"<%= name === filters.sort ? ' selected' : '' %>><%= sortLabels[name] || name %></option><% }) %>
+          </select></div>
+        <button class="primary-button" id="feed-apply" type="submit">Apply</button>
+      </form>
+      <p class="feed-status" id="feed-status" role="status" aria-live="polite"></p>
+      <section class="article-list" id="feed" aria-label="Articles" data-next-cursor="<%= nextCursor || '' %>">
+        <% if (!articles.length) { %>
+          <div class="empty-state"><h2><%= filters.q || filters.category ? 'No matching articles' : 'No articles yet' %></h2><p><%= filters.q || filters.category ? 'Try another search or category.' : 'Published stories will appear here.' %></p></div>
         <% } else { articles.forEach(article => { %>
           <%- include('partials/articleCard', { article }) %>
         <% }) } %>
       </section>
+      <div id="feed-sentinel" aria-hidden="true"></div>
+      <% if (hasMore) { %><a class="more-link" id="feed-more" href="/?<%= new URLSearchParams({ q: filters.q, category: filters.category, sort: filters.sort, cursor: nextCursor }) %>">More articles</a><% } %>
     </main>
     <%- include('partials/sidebar') %>
   </div>
   <%- include('partials/footer') %>
+  <script src="/feed.js" defer></script>
 </body>
 </html>
