@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { app } = require('../app');
+const Article = require('../models/Article');
 const Session = require('../models/Session');
 const { hashToken } = require('../middleware/auth');
 
@@ -15,6 +16,8 @@ test('shared header reflects guest, reporter and editor sessions', async t => {
     const user = users.get(tokenHash);
     return user ? { user } : null;
   } }));
+
+  t.mock.method(Article, 'find', () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, populate() { return this; }, async lean() { return []; } }));
 
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));

@@ -27,6 +27,7 @@ test('models reject invalid roles, statuses and empty comments; drafts stay sepa
 });
 
 test('HTTP foundation renders, exposes placeholders and handles invalid requests', async (t) => {
+  t.mock.method(Article, 'find', () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, populate() { return this; }, async lean() { return []; } }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
