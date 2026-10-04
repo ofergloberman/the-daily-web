@@ -85,6 +85,20 @@ Article statuses are `draft`, `pending`, `published`, and `returned`. The schema
 
 Mongoose does not verify that referenced documents exist. Future controllers are responsible for validating references, content completeness, status transitions, and copying an approved draft into the published snapshot. The unique username index also requires the controller to handle duplicate-key errors.
 
+## Shared device identity contract (D3 handoff)
+
+`middleware/deviceIdentity.js` runs before authentication and application routes, including the public homepage, articles, and comments. Static files and the health check do not create device cookies.
+
+- Cookie name: `wd_device`. Its value is 32 cryptographically random bytes encoded as exactly 64 lowercase hexadecimal characters.
+- Controllers receive `req.deviceId`: the validated cookie value or a newly generated replacement for a missing or malformed value. Read this property rather than parsing cookies separately.
+- New cookies use `HttpOnly`, `SameSite=Lax`, `Path=/`, and a persistent lifetime of 365 days. `Secure` is enabled when `NODE_ENV=production`; production must use HTTPS.
+- Valid cookies are reused without renewal. Login, session rotation, and logout preserve the device identity; `wd_session` remains separate.
+- Clearing cookies resets viewed-history identity and the guest comment-limit identity. A browser profile is the identity boundary, not a physical device or account. This cookie is not an authentication or authorization credential.
+
+D3 owns viewed/not-viewed storage and filtering using `req.deviceId`. The guest comment limiter should use the same identity for its server-side limit of three comments per minute. This change provides the shared identity only; it does not implement either consumer. Cookie-based tracking cannot preserve identity when users clear or replace their cookies.
+
+Validation: `node --test test/device-identity.test.js test/auth.test.js` covers creation, reuse, malformed input, cookie attributes, route mounting, and login/logout continuity. `npm test` runs the full regression suite.
+
 ## Analytics storage contract
 
 These schemas provide the Stage 0 storage foundation for requirements 12 and 14. Collection and approval controllers, analytics endpoints, and graphs remain future work.
