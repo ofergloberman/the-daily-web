@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
 const { editorArea } = require('./controllers/authController');
+const { showHome } = require('./controllers/publicArticleController');
 
 const app = express();
 app.disable('x-powered-by');
@@ -17,7 +18,7 @@ app.get('/health', (_req, res) => {
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
 app.use(loadUser);
-app.get('/', (req, res) => res.render('index', { user: req.user }));
+app.get('/', showHome);
 app.use('/auth', require('./routes/auth'));
 app.use('/reporter', requireReporter, require('./routes/reporter'));
 app.get('/editor', requireEditor, editorArea);
