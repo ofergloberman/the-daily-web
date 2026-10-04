@@ -1,0 +1,7 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><%= locals.title ? `${title} | The Daily Web` : 'The Daily Web' %></title>
+<% if (locals.description) { %><meta name="description" content="<%= description %>"><% } %>
+<link rel="stylesheet" href="/base.css">
+<% (locals.styles || []).forEach(href => { %><link rel="stylesheet" href="<%= href %>">
+<% }) %>

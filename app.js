@@ -17,7 +17,7 @@ app.get('/health', (_req, res) => {
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
 app.use(loadUser);
-app.get('/', (_req, res) => res.render('index'));
+app.get('/', (req, res) => res.render('index', { user: req.user }));
 app.use('/auth', require('./routes/auth'));
 app.use('/reporter', requireReporter, require('./routes/reporter'));
 app.get('/editor', requireEditor, editorArea);
