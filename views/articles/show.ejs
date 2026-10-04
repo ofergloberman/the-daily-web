@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head') %>
+</head>
+<body>
+  <%- include('../partials/header') %>
+  <div class="page-shell">
+    <main class="page-main">
+      <article class="article-page">
+        <header>
+          <% if (article.published.category) { %><p class="section-label"><%= article.published.category %></p><% } %>
+          <h1><%= article.published.title || 'Untitled article' %></h1>
+          <% if (article.published.summary) { %><p class="article-summary"><%= article.published.summary %></p><% } %>
+          <p class="article-meta">By <%= article.author?.displayName || 'Staff' %><% if (article.publishedAt) { %> &middot; <time datetime="<%= new Date(article.publishedAt).toISOString() %>"><%= new Date(article.publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) %></time><% } %></p>
+        </header>
+        <% if (article.published.imageUrl) { %><img class="article-image" src="<%= article.published.imageUrl %>" alt=""><% } %>
+        <div class="article-body">
+          <% paragraphs.forEach(text => { %><p><%= text %></p>
+          <% }) %>
+        </div>
+      </article>
+      <%# D1 fills this slot with the comments section. %>
+      <section class="comments-slot" id="comments" data-article-id="<%= article._id %>" aria-label="Comments"></section>
+    </main>
+    <%- include('../partials/sidebar') %>
+  </div>
+  <%- include('../partials/footer') %>
+</body>
+</html>
