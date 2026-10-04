@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
+const { deviceIdentity } = require('./middleware/deviceIdentity');
 const { editorArea } = require('./controllers/authController');
 const { showHome } = require('./controllers/publicArticleController');
 const { formatDate } = require('./helpers/dates');
@@ -19,6 +20,7 @@ app.get('/health', (_req, res) => {
   const connected = mongoose.connection.readyState === 1;
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
+app.use(deviceIdentity);
 app.use(loadUser);
 app.get('/', showHome);
 app.use('/auth', require('./routes/auth'));

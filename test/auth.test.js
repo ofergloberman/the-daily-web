@@ -7,6 +7,10 @@ const Session = require('../models/Session');
 const Article = require('../models/Article');
 const { hashToken, readSessionToken } = require('../middleware/auth');
 
+function getCookie(response, name) {
+  return response.headers.getSetCookie().find(cookie => cookie.startsWith(`${name}=`));
+}
+
 async function listen() {
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
@@ -63,7 +67,8 @@ test('login, role checks, restart continuity, and logout', async t => {
   const login = await post('/auth/login', { username: ' REPORTER ', password: 'correct-password', role: 'editor' });
   assert.equal(login.status, 200);
   assert.equal((await login.json()).user.role, 'reporter');
-  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const cookie = getCookie(login, 'wd_session').split(';')[0];
+  assert.match(getCookie(login, 'wd_device'), /^wd_device=[a-f0-9]{64};/);
   const token = readSessionToken(cookie);
   assert.ok(token);
   assert.equal(sessions.has(hashToken(token)), true);
@@ -84,7 +89,26 @@ test('login, role checks, restart continuity, and logout', async t => {
   const editorLogin = await post('/auth/login', { username: 'editor', password: 'editor-password' });
   assert.equal(editorLogin.status, 200);
   assert.equal((await editorLogin.json()).redirectTo, '/editor');
-  const editorCookie = editorLogin.headers.get('set-cookie').split(';')[0];
+  const editorCookie = getCookie(editorLogin, 'wd_session').split(';')[0];
   assert.equal((await fetch(running.base + '/editor', { headers: { Cookie: editorCookie } })).status, 200);
   assert.equal((await fetch(running.base + '/reporter', { headers: { Cookie: editorCookie } })).status, 403);
+
+  // An existing guest identity survives session creation, rotation, and deletion.
+  const guest = await fetch(running.base + '/auth');
+  const deviceCookie = getCookie(guest, 'wd_device').split(';')[0];
+  const guestLogin = await post('/auth/login', { username: 'reporter', password: 'correct-password' }, deviceCookie);
+  assert.equal(guestLogin.status, 200);
+  assert.equal(getCookie(guestLogin, 'wd_device'), undefined);
+  const guestSession = getCookie(guestLogin, 'wd_session').split(';')[0];
+  const rotatedLogin = await post('/auth/login', { username: 'reporter', password: 'correct-password' }, `${deviceCookie}; ${guestSession}`);
+  assert.equal(rotatedLogin.status, 200);
+  assert.equal(getCookie(rotatedLogin, 'wd_device'), undefined);
+  const rotatedSession = getCookie(rotatedLogin, 'wd_session').split(';')[0];
+  const guestLogout = await post('/auth/logout', {}, `${deviceCookie}; ${rotatedSession}`);
+  assert.equal(guestLogout.status, 204);
+  assert.match(getCookie(guestLogout, 'wd_session'), /^wd_session=;/);
+  assert.equal(getCookie(guestLogout, 'wd_device'), undefined);
+  const afterLogout = await fetch(running.base + '/auth', { headers: { Cookie: deviceCookie } });
+  assert.equal(afterLogout.status, 200);
+  assert.equal(getCookie(afterLogout, 'wd_device'), undefined);
 });
