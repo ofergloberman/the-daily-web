@@ -9,7 +9,8 @@
     "start": "node --env-file-if-exists=.env app.js",
     "dev": "node --env-file-if-exists=.env --watch app.js",
     "test": "node --test test/*.test.js",
-    "create-user": "node --env-file-if-exists=.env scripts/createUser.js"
+    "create-user": "node --env-file-if-exists=.env scripts/createUser.js",
+    "seed:dev3": "node --env-file-if-exists=.env scripts/seedDev3Fixtures.js"
   },
   "dependencies": { "ejs": "^3.1.10", "express": "^5.1.0", "mongoose": "^9.0.0" }
 }

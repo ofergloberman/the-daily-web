@@ -1,11 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>The Daily Web</title></head>
+<head>
+  <%- include('partials/head', { title: null, description: 'Latest news from The Daily Web.' }) %>
+</head>
 <body>
-  <main>
-    <h1>The Daily Web</h1>
-    <p>Shared server foundation is ready. The news website will be implemented in the next development stages.</p>
-    <p><a href="/health">Check database connection</a></p>
-  </main>
+  <%- include('partials/header') %>
+  <div class="page-shell">
+    <main class="page-main">
+      <p class="section-label">Latest news</p>
+      <section class="article-list" id="feed" aria-live="polite">
+        <% if (!locals.articles || !articles.length) { %>
+          <div class="empty-state"><h2>No articles yet</h2><p>Published stories will appear here.</p></div>
+        <% } else { articles.forEach(article => { %>
+          <%- include('partials/articleCard', { article }) %>
+        <% }) } %>
+      </section>
+    </main>
+    <%- include('partials/sidebar') %>
+  </div>
+  <%- include('partials/footer') %>
 </body>
 </html>

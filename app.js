@@ -4,11 +4,14 @@ const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
 const { editorArea } = require('./controllers/authController');
+const { showHome } = require('./controllers/publicArticleController');
+const { formatDate } = require('./helpers/dates');
 
 const app = express();
 app.disable('x-powered-by');
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+app.locals.formatDate = formatDate;
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -17,7 +20,7 @@ app.get('/health', (_req, res) => {
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
 app.use(loadUser);
-app.get('/', (_req, res) => res.render('index'));
+app.get('/', showHome);
 app.use('/auth', require('./routes/auth'));
 app.use('/reporter', requireReporter, require('./routes/reporter'));
 app.get('/editor', requireEditor, editorArea);
