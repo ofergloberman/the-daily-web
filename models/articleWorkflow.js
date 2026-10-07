@@ -1,20 +1,23 @@
 // Article domain contract (Developer 2). See docs/ARTICLE_CONTRACT.md for the
 // narrative version of everything below.
 //
-// Step 1 scope: status transitions, public projection, validation rules, and
-// stable method signatures so D3/D4 can code against this module without
-// editing the Article schema themselves. The database-backed operations
-// (createDraft, saveDraftContent, submitForApproval, editAsEditor,
-// returnForCorrections, approve, deleteArticle, getOwnArticle,
-// listOwnArticlesQuery) are implemented in Step 2; calling them now throws a
-// clear "not implemented yet" error instead of silently doing the wrong thing.
-const { ARTICLE_STATUSES, ARTICLE_TRANSITIONS, DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, ERROR_HTTP_STATUS } = require('../config/constants');
+// The model-layer workflow coordinates database operations across Article,
+// PublicationEvent, Comment, and ViewStatistic. Controllers remain
+// responsible for request handling (body/param shape, HTML vs JSON) and for
+// invoking these functions with the authenticated actor (`req.user`, shaped
+// as `{ id, role }` - D1's authenticated-user middleware).
+const mongoose = require('mongoose');
+const Article = require('./Article');
+const PublicationEvent = require('./PublicationEvent');
+const Comment = require('./Comment');
+const ViewStatistic = require('./ViewStatistic');
+const { ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS, DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, ERROR_HTTP_STATUS } = require('../config/constants');
 
 /**
  * Thrown by every articleWorkflow function on a rule violation. `code` is one
  * of the keys in ERROR_HTTP_STATUS (config/constants.js) - controllers should
- * use `ERROR_HTTP_STATUS[error.code]` (also available as `error.status`) to
- * choose the HTTP response.
+ * use `error.status` (or `ERROR_HTTP_STATUS[error.code]`) to choose the HTTP
+ * response.
  */
 class WorkflowError extends Error {
   constructor(code, message) {
@@ -61,9 +64,62 @@ function getPublicProjection(article) {
   };
 }
 
-function notImplemented(name) {
-  throw new Error(`articleWorkflow.${name} is implemented in Step 2.`);
+// ---- internal helpers (not exported) ---------------------------------
+
+function requireRole(user, role) {
+  if (!user || user.role !== role) throw new WorkflowError('FORBIDDEN', `Only ${role} accounts may perform this action.`);
 }
+
+function requireAnyRole(user, roles) {
+  if (!user || !roles.includes(user.role)) throw new WorkflowError('FORBIDDEN', 'You are not allowed to perform this action.');
+}
+
+function requireValidId(articleId) {
+  if (!mongoose.isValidObjectId(articleId)) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  return articleId;
+}
+
+/** Picks only DRAFT_EDITABLE_FIELDS keys present in `patch`; validates each is a string. */
+function pickDraftFields(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new WorkflowError('INVALID_CONTENT', 'Expected a content object.');
+  }
+  const picked = {};
+  for (const field of DRAFT_EDITABLE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    if (typeof patch[field] !== 'string') throw new WorkflowError('INVALID_CONTENT', `Invalid ${field}.`);
+    picked[field] = patch[field];
+  }
+  return picked;
+}
+
+/** Builds a `{ 'draft.field': value }` $set object, ignoring unknown keys. */
+function buildDraftSet(patch) {
+  const picked = pickDraftFields(patch);
+  const set = {};
+  for (const [field, value] of Object.entries(picked)) set[`draft.${field}`] = value;
+  return set;
+}
+
+/** Plain snapshot object (title/summary/body/category/imageUrl) copied out of a draft subdocument. */
+function snapshotFromDraft(draft) {
+  const snapshot = {};
+  for (const field of DRAFT_EDITABLE_FIELDS) snapshot[field] = draft?.[field] ?? '';
+  return snapshot;
+}
+
+/** Runs a DB write, translating Mongoose validation/cast errors into WorkflowError('INVALID_CONTENT'). */
+async function guardWrite(run) {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof WorkflowError) throw error;
+    if (error.name === 'ValidationError' || error.name === 'CastError') throw new WorkflowError('INVALID_CONTENT', error.message);
+    throw error;
+  }
+}
+
+// ---- exported operations -----------------------------------------------
 
 /**
  * Creates a new `draft`-status article owned by `user`.
@@ -71,7 +127,11 @@ function notImplemented(name) {
  * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>>} [initialContent]
  * @returns {Promise<import('./Article')>}
  */
-async function createDraft(user, initialContent) { notImplemented('createDraft'); }
+async function createDraft(user, initialContent) {
+  requireRole(user, ROLES.REPORTER);
+  const draft = initialContent ? pickDraftFields(initialContent) : undefined;
+  return guardWrite(() => Article.create({ author: user.id, status: ARTICLE_STATUSES.DRAFT, ...(draft ? { draft } : {}) }));
+}
 
 /**
  * Fetches an article by id with an ownership check. Reporters may only fetch
@@ -83,7 +143,15 @@ async function createDraft(user, initialContent) { notImplemented('createDraft')
  * @param {{id: string, role: string}} user
  * @returns {Promise<import('./Article')>}
  */
-async function getOwnArticle(articleId, user) { notImplemented('getOwnArticle'); }
+async function getOwnArticle(articleId, user) {
+  requireAnyRole(user, [ROLES.REPORTER, ROLES.EDITOR]);
+  const id = requireValidId(articleId);
+  const filter = { _id: id };
+  if (user.role === ROLES.REPORTER) filter.author = user.id;
+  const article = await Article.findOne(filter);
+  if (!article) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  return article;
+}
 
 /**
  * A Mongoose query (not yet executed) for a Reporter/Editor's article list.
@@ -91,7 +159,16 @@ async function getOwnArticle(articleId, user) { notImplemented('getOwnArticle');
  * @param {{ status?: string }} [filters]
  * @returns {import('mongoose').Query}
  */
-function listOwnArticlesQuery(user, filters) { notImplemented('listOwnArticlesQuery'); }
+function listOwnArticlesQuery(user, { status } = {}) {
+  requireAnyRole(user, [ROLES.REPORTER, ROLES.EDITOR]);
+  if (status !== undefined && !Object.values(ARTICLE_STATUSES).includes(status)) {
+    throw new WorkflowError('INVALID_CONTENT', 'Unknown status filter.');
+  }
+  const filter = {};
+  if (user.role === ROLES.REPORTER) filter.author = user.id;
+  if (status) filter.status = status;
+  return Article.find(filter);
+}
 
 /**
  * Autosave. Writes only DRAFT_EDITABLE_FIELDS keys present in `patch`; any
@@ -102,7 +179,22 @@ function listOwnArticlesQuery(user, filters) { notImplemented('listOwnArticlesQu
  * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>>} patch
  * @returns {Promise<import('./Article')>}
  */
-async function saveDraftContent(articleId, user, patch) { notImplemented('saveDraftContent'); }
+async function saveDraftContent(articleId, user, patch) {
+  requireAnyRole(user, [ROLES.REPORTER, ROLES.EDITOR]);
+  const id = requireValidId(articleId);
+  const set = buildDraftSet(patch);
+  const filter = { _id: id };
+  if (user.role === ROLES.REPORTER) filter.author = user.id;
+  const current = await Article.findOne(filter);
+  if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  if (current.status === ARTICLE_STATUSES.PENDING) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
+  const updated = await guardWrite(() => Article.findOneAndUpdate(
+    { ...filter, status: { $ne: ARTICLE_STATUSES.PENDING } },
+    { $set: set }, { new: true, runValidators: true }
+  ));
+  if (!updated) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
+  return updated;
+}
 
 /**
  * Reporter-only. `draft/returned/published -> pending`. Throws
@@ -111,7 +203,20 @@ async function saveDraftContent(articleId, user, patch) { notImplemented('saveDr
  * @param {{id: string, role: string}} user
  * @returns {Promise<import('./Article')>}
  */
-async function submitForApproval(articleId, user) { notImplemented('submitForApproval'); }
+async function submitForApproval(articleId, user) {
+  requireRole(user, ROLES.REPORTER);
+  const id = requireValidId(articleId);
+  const current = await Article.findOne({ _id: id, author: user.id });
+  if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  assertTransition(current.status, ARTICLE_STATUSES.PENDING);
+  if (!isContentComplete(current.draft)) throw new WorkflowError('INCOMPLETE_CONTENT', 'Title, summary, body, and category are required before submission.');
+  const updated = await guardWrite(() => Article.findOneAndUpdate(
+    { _id: id, author: user.id, status: current.status },
+    { $set: { status: ARTICLE_STATUSES.PENDING } }, { new: true, runValidators: true }
+  ));
+  if (!updated) throw new WorkflowError('INVALID_TRANSITION', 'This article was already changed by another request.');
+  return updated;
+}
 
 /**
  * Editor-only direct content edit. No status change.
@@ -120,7 +225,16 @@ async function submitForApproval(articleId, user) { notImplemented('submitForApp
  * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>>} patch
  * @returns {Promise<import('./Article')>}
  */
-async function editAsEditor(articleId, user, patch) { notImplemented('editAsEditor'); }
+async function editAsEditor(articleId, user, patch) {
+  requireRole(user, ROLES.EDITOR);
+  const id = requireValidId(articleId);
+  const set = buildDraftSet(patch);
+  const updated = await guardWrite(() => Article.findOneAndUpdate(
+    { _id: id }, { $set: set }, { new: true, runValidators: true }
+  ));
+  if (!updated) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  return updated;
+}
 
 /**
  * Editor-only. `pending -> returned` with a required note. Throws
@@ -130,18 +244,68 @@ async function editAsEditor(articleId, user, patch) { notImplemented('editAsEdit
  * @param {string} note
  * @returns {Promise<import('./Article')>}
  */
-async function returnForCorrections(articleId, user, note) { notImplemented('returnForCorrections'); }
+async function returnForCorrections(articleId, user, note) {
+  requireRole(user, ROLES.EDITOR);
+  if (typeof note !== 'string' || !note.trim()) throw new WorkflowError('NOTE_REQUIRED', 'A correction note is required.');
+  const id = requireValidId(articleId);
+  const current = await Article.findById(id);
+  if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  assertTransition(current.status, ARTICLE_STATUSES.RETURNED);
+  const updated = await guardWrite(() => Article.findOneAndUpdate(
+    { _id: id, status: ARTICLE_STATUSES.PENDING },
+    { $set: { status: ARTICLE_STATUSES.RETURNED, editorNote: note.trim() } }, { new: true, runValidators: true }
+  ));
+  if (!updated) throw new WorkflowError('INVALID_TRANSITION', 'This article was already handled by another request.');
+  return updated;
+}
 
 /**
  * Editor-only. `pending -> published`. Copies `draft` into `published`
  * atomically, creates exactly one PublicationEvent (`kind: 'initial'` the
  * first time, `'update'` afterwards), and sets `currentPublication`.
- * Transactional: requires a replica-set MongoDB connection.
+ * Transactional: requires a replica-set MongoDB connection (see
+ * docs/ARTICLE_CONTRACT.md §7). The write that flips status away from
+ * `pending` is conditional on the status still being `pending`, so a racing
+ * duplicate approval sees no match and fails instead of creating a second event.
  * @param {string} articleId
  * @param {{id: string, role: string}} user
  * @returns {Promise<import('./Article')>}
  */
-async function approve(articleId, user) { notImplemented('approve'); }
+async function approve(articleId, user) {
+  requireRole(user, ROLES.EDITOR);
+  const id = requireValidId(articleId);
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      const current = await Article.findById(id).session(session);
+      if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+      assertTransition(current.status, ARTICLE_STATUSES.PUBLISHED);
+      const publishedAt = new Date();
+      const kind = current.publishedAt ? 'update' : 'initial';
+      const [event] = await PublicationEvent.create([{ article: current._id, editor: user.id, publishedAt, kind }], { session });
+      const updated = await guardWrite(() => Article.findOneAndUpdate(
+        { _id: id, status: ARTICLE_STATUSES.PENDING },
+        {
+          $set: {
+            published: snapshotFromDraft(current.draft),
+            status: ARTICLE_STATUSES.PUBLISHED,
+            editorNote: '',
+            publishedAt: current.publishedAt || publishedAt,
+            lastPublishedAt: publishedAt,
+            currentPublication: event._id
+          }
+        },
+        { new: true, runValidators: true, session }
+      ));
+      if (!updated) throw new WorkflowError('INVALID_TRANSITION', 'This article was already handled by another request.');
+      result = updated;
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
 
 /**
  * Editor-only cascading delete, transactional: Comments, PublicationEvents,
@@ -150,7 +314,23 @@ async function approve(articleId, user) { notImplemented('approve'); }
  * @param {{id: string, role: string}} user
  * @returns {Promise<void>}
  */
-async function deleteArticle(articleId, user) { notImplemented('deleteArticle'); }
+async function deleteArticle(articleId, user) {
+  requireRole(user, ROLES.EDITOR);
+  const id = requireValidId(articleId);
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const article = await Article.findById(id).session(session);
+      if (!article) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+      await Comment.deleteMany({ article: id }).session(session);
+      await PublicationEvent.deleteMany({ article: id }).session(session);
+      await ViewStatistic.deleteMany({ article: id }).session(session);
+      await Article.deleteOne({ _id: id }).session(session);
+    });
+  } finally {
+    await session.endSession();
+  }
+}
 
 module.exports = {
   WorkflowError,
