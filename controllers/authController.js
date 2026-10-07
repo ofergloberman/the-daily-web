@@ -61,8 +61,4 @@ function me(req, res) {
   res.json({ user: publicUser(req.user) });
 }
 
-function editorArea(req, res) {
-  res.render('workArea', { user: publicUser(req.user), title: 'Editor management area' });
-}
-
-module.exports = { showLogin, login, logout, me, editorArea };
+module.exports = { showLogin, login, logout, me };

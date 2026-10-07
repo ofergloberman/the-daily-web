@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head') %>
+</head>
+<body>
+  <%- include('../partials/header') %>
+  <div class="page-shell">
+    <main class="page-main">
+      <p><a href="/editor">&larr; All articles</a></p>
+      <header class="review-header">
+        <p class="section-label">Review</p>
+        <h1><%= article.draft?.title || article.published?.title || 'Untitled article' %></h1>
+        <p class="card-meta">
+          By <%= article.author?.displayName || 'Unknown reporter' %>
+          &middot; <span class="status-badge status-<%= article.status %>"><%= statusLabel %></span>
+          &middot; Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= formatDate(article.updatedAt, 'long') %></time>
+          <% if (article.lastPublishedAt) { %>&middot; Last published <time datetime="<%= article.lastPublishedAt.toISOString() %>"><%= formatDate(article.lastPublishedAt, 'long') %></time><% } %>
+        </p>
+        <% if (article.published) { %><p><a href="/analytics?article=<%= article._id %>">View impact analytics</a></p><% } %>
+      </header>
+
+      <% if (article.editorNote) { %>
+        <section class="notice" aria-label="Correction note">
+          <strong>Correction note</strong>
+          <p class="note-text"><%= article.editorNote %></p>
+        </section>
+      <% } %>
+      <% if (!article.published) { %>
+        <p class="notice">This article has never been published. Only the reporter's working draft exists.</p>
+      <% } %>
+
+      <% fields.forEach(field => { %>
+        <section class="compare-field<%= field.current === null ? ' compare-field-single' : '' %>" aria-labelledby="field-<%= field.key %>">
+          <h2 id="field-<%= field.key %>" class="compare-title">
+            <%= field.label %>
+            <% if (field.changed) { %><span class="changed-badge">Changed</span><% } %>
+          </h2>
+          <div class="compare-columns">
+            <% if (field.current !== null) { %>
+              <div class="compare-column compare-column-published">
+                <p class="compare-label">Currently published</p>
+                <%- include('reviewValue', { field, value: field.current, isHttpUrl }) %>
+              </div>
+            <% } %>
+            <div class="compare-column">
+              <p class="compare-label"><%= draftHeading %></p>
+              <%- include('reviewValue', { field, value: field.proposed, isHttpUrl }) %>
+            </div>
+          </div>
+        </section>
+      <% }) %>
+    </main>
+  </div>
+  <%- include('../partials/footer') %>
+</body>
+</html>

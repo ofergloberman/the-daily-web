@@ -1,0 +1,41 @@
+/* Editor desk and review pages. Tokens and layout come from base.css. */
+.editor-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+.editor-heading h1 { margin: 0 0 .5rem; font-size: 2rem; }
+
+.status-filter { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 1.5rem; }
+.status-filter a { padding: .4rem .9rem; border: 1px solid var(--line); border-radius: 2rem; background: var(--white); color: var(--ink); font-size: .9rem; text-decoration: none; }
+.status-filter a:hover { background: var(--pale); }
+.status-filter a[aria-current="page"] { border-color: var(--blue-dark); background: var(--blue); color: var(--white); }
+
+.editor-row { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; padding: 1.1rem 0; border-bottom: 1px solid var(--line); }
+.editor-row-main { min-width: 0; }
+.editor-row-title { margin: 0; font-size: 1.2rem; line-height: 1.3; }
+.editor-row-title a { color: var(--ink); text-decoration: none; }
+.editor-row-title a:hover { text-decoration: underline; }
+.editor-row-status { display: flex; flex-direction: column; align-items: flex-end; gap: .35rem; flex: none; }
+.status-note { color: var(--muted); font-size: .8rem; }
+.status-badge { display: inline-block; padding: .15rem .6rem; border-radius: 2rem; background: var(--pale); color: var(--blue-dark); font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.status-pending { background: #fff3d6; color: #7a5200; }
+.status-published { background: #e1f1e7; color: var(--success); }
+.status-returned { background: #f9e8e6; color: var(--error); }
+
+.page-nav { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.5rem; color: var(--muted); font-size: .9rem; }
+
+.review-header h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.15; }
+.note-text, .compare-value { margin: .3rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.compare-field { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.compare-title { display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem; font-size: 1.1rem; }
+.changed-badge { padding: .1rem .5rem; border-radius: 2rem; background: #fff3d6; color: #7a5200; font: 700 .75rem/1.4 'Trebuchet MS', sans-serif; letter-spacing: 0; }
+.compare-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
+.compare-field-single .compare-columns { grid-template-columns: minmax(0, 1fr); }
+.compare-column { padding: 1rem; border: 1px solid var(--line); background: var(--white); }
+.compare-column-published { border-left: 4px solid var(--success); }
+.compare-label { margin: 0; color: var(--muted); font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.compare-empty { margin: .3rem 0 0; color: var(--muted); font-style: italic; }
+.compare-image { display: block; max-height: 14rem; margin-top: .75rem; object-fit: cover; }
+
+@media (max-width: 600px) {
+  .editor-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
+  .editor-row-status { align-items: flex-start; }
+  .compare-columns { grid-template-columns: minmax(0, 1fr); }
+}
