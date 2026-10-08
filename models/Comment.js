@@ -7,5 +7,5 @@ const commentSchema = new mongoose.Schema({
   body: { type: String, required: true, trim: true, maxlength: 2000 }
 }, { timestamps: true });
 
-commentSchema.index({ article: 1, createdAt: -1 });
+commentSchema.index({ article: 1, createdAt: -1, _id: -1 });
 module.exports = mongoose.model('Comment', commentSchema);
