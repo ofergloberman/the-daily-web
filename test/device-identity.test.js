@@ -74,7 +74,7 @@ test('application mounts device identity before homepage, article, and comment h
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
-  for (const [path, method, status] of [['/', 'GET', 200], ['/articles/invalid', 'GET', 404], ['/comments', 'POST', 501]]) {
+  for (const [path, method, status] of [['/', 'GET', 200], ['/articles/invalid', 'GET', 404], ['/comments', 'POST', 400]]) {
     const response = await fetch(base + path, { method });
     assert.equal(response.status, status);
     const cookie = response.headers.getSetCookie().find(value => value.startsWith('wd_device='));

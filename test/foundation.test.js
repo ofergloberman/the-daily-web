@@ -26,7 +26,7 @@ test('models reject invalid roles, statuses and empty comments; drafts stay sepa
   await assert.rejects(comment.validate(), error => Boolean(error.errors.body));
 });
 
-test('HTTP foundation renders, exposes placeholders and handles invalid requests', async (t) => {
+test('HTTP foundation renders, exposes remaining placeholders and handles invalid requests', async (t) => {
   t.mock.method(Article, 'find', () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, populate() { return this; }, async lean() { return []; } }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
@@ -35,9 +35,8 @@ test('HTTP foundation renders, exposes placeholders and handles invalid requests
   assert.match(await (await fetch(base)).text(), /The Daily Web/);
   assert.equal((await fetch(`${base}/health`)).status, 503);
   assert.equal((await fetch(`${base}/auth`)).status, 200);
-  for (const route of ['/articles', '/comments']) {
-    assert.equal((await fetch(base + route)).status, 501);
-  }
+  assert.equal((await fetch(`${base}/articles`)).status, 501);
+  assert.equal((await fetch(`${base}/comments`)).status, 400);
   assert.equal((await fetch(`${base}/missing`)).status, 404);
   const invalid = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
   assert.equal(invalid.status, 400);

@@ -58,7 +58,7 @@ async function start() {
 
 if (require.main === module) {
   start().catch(async () => {
-    console.error('Startup failed. Check PORT, MONGODB_URI and MongoDB availability.');
+    console.error('Startup failed. Check PORT, MONGODB_URI, MongoDB availability and transaction support.');
     await mongoose.disconnect();
     process.exitCode = 1;
   });
