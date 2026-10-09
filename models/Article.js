@@ -18,10 +18,16 @@ const articleSchema = new mongoose.Schema({
   status: { type: String, enum: Object.values(ARTICLE_STATUSES), default: ARTICLE_STATUSES.DRAFT, required: true },
   editorNote: { type: String, trim: true, maxlength: 2000, default: '' },
   publishedAt: { type: Date, default: null },
-  lastPublishedAt: { type: Date, default: null }
+  lastPublishedAt: { type: Date, default: null },
+  // Identifies the exact PublicationEvent whose content is currently live, so a
+  // page/visit response can record against the publication it actually served.
+  currentPublication: { type: mongoose.Schema.Types.ObjectId, ref: 'PublicationEvent', default: null },
+  // Indexed popularity counter kept consistent with ViewStatistic bucket totals by D4.
+  totalViews: { type: Number, default: 0, min: 0 }
 }, { timestamps: true });
 
 articleSchema.index({ author: 1, status: 1 });
 articleSchema.index({ publishedAt: -1 });
+articleSchema.index({ totalViews: -1 });
 articleSchema.index({ 'published.title': 'text' });
 module.exports = mongoose.model('Article', articleSchema);
