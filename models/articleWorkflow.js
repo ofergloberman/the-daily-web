@@ -11,7 +11,7 @@ const Article = require('./Article');
 const PublicationEvent = require('./PublicationEvent');
 const Comment = require('./Comment');
 const ViewStatistic = require('./ViewStatistic');
-const { ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS, DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, ERROR_HTTP_STATUS } = require('../config/constants');
+const { ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS, DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, ERROR_HTTP_STATUS } = require('../config/constants');
 
 /**
  * Thrown by every articleWorkflow function on a rule violation. `code` is one
@@ -88,6 +88,7 @@ function pickDraftFields(patch) {
   for (const field of DRAFT_EDITABLE_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
     if (typeof patch[field] !== 'string') throw new WorkflowError('INVALID_CONTENT', `Invalid ${field}.`);
+    if (patch[field].length > DRAFT_FIELD_LIMITS[field]) throw new WorkflowError('INVALID_CONTENT', `${field} exceeds its maximum length.`);
     picked[field] = patch[field];
   }
   return picked;

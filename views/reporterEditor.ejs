@@ -14,23 +14,33 @@
   </header>
   <main class="editor-shell">
     <a class="back-link" href="/reporter">Back to your articles</a>
-    <div class="editor-heading"><div><p class="section-label">Private draft</p><h1>Write your article</h1><p>Your work saves while you write.</p></div><div class="save-indicator" aria-live="polite"><span class="save-dot"></span><span id="save-status">Saved</span><button id="retry-save" class="text-button" type="button" hidden>Retry save</button></div></div>
-    <form id="draft-form" data-save-url="/reporter/articles/<%= article._id %>/draft" autocomplete="off">
+    <div class="editor-heading"><div><p class="section-label"><%= locked ? 'Awaiting review' : 'Private draft' %></p><h1>Write your article</h1><p>Your work saves while you write.</p></div><div class="save-indicator" aria-live="polite"><span class="save-dot"></span><span id="save-status"><%= locked ? 'Locked' : 'Saved' %></span><button id="retry-save" class="text-button" type="button" hidden>Retry save</button></div></div>
+    <% if (article.status === 'returned' && article.editorNote) { %>
+      <p class="editor-note-banner">Editor note: <%= article.editorNote %></p>
+    <% } %>
+    <% if (locked) { %>
+      <p class="locked-banner">This article is awaiting editor review and cannot be edited until it is returned for corrections or approved.</p>
+    <% } %>
+    <form id="draft-form" data-save-url="/reporter/articles/<%= article._id %>/draft" data-submit-url="/reporter/articles/<%= article._id %>/submit" autocomplete="off">
       <div class="editor-main">
         <div class="writing-column">
           <label class="field-label" for="title">Title</label>
-          <input id="title" name="title" class="title-input" type="text" maxlength="200" placeholder="Give the story a clear headline" value="<%= article.draft.title %>">
+          <input id="title" name="title" class="title-input" type="text" maxlength="200" placeholder="Give the story a clear headline" value="<%= article.draft.title %>"<%= locked ? ' disabled' : '' %>>
           <label class="field-label" for="summary">Summary</label>
-          <textarea id="summary" name="summary" rows="3" maxlength="500" placeholder="What should readers know first?"><%= article.draft.summary %></textarea>
+          <textarea id="summary" name="summary" rows="3" maxlength="500" placeholder="What should readers know first?"<%= locked ? ' disabled' : '' %>><%= article.draft.summary %></textarea>
           <label class="field-label" for="body">Article</label>
-          <textarea id="body" name="body" class="body-input" rows="18" maxlength="50000" placeholder="Start writing here..."><%= article.draft.body %></textarea>
+          <textarea id="body" name="body" class="body-input" rows="18" maxlength="50000" placeholder="Start writing here..."<%= locked ? ' disabled' : '' %>><%= article.draft.body %></textarea>
         </div>
         <aside class="story-details" aria-labelledby="details-heading"><h2 id="details-heading">Story details</h2><p>These details will appear alongside the article after approval.</p>
           <label class="field-label" for="category">Category</label>
-          <input id="category" name="category" type="text" maxlength="80" placeholder="e.g. Technology" value="<%= article.draft.category %>">
+          <input id="category" name="category" type="text" maxlength="80" placeholder="e.g. Technology" value="<%= article.draft.category %>"<%= locked ? ' disabled' : '' %>>
           <label class="field-label" for="imageUrl">Main image URL</label>
-          <input id="imageUrl" name="imageUrl" type="url" maxlength="2048" placeholder="https://example.com/photo.jpg" value="<%= article.draft.imageUrl %>">
+          <input id="imageUrl" name="imageUrl" type="url" maxlength="2048" placeholder="https://example.com/photo.jpg" value="<%= article.draft.imageUrl %>"<%= locked ? ' disabled' : '' %>>
           <p class="field-help">Use a public image URL beginning with http or https.</p>
+          <% if (!locked) { %>
+            <button id="submit-button" class="primary-button" type="button"<%= canSubmit ? '' : ' disabled' %>>Submit for review</button>
+            <p id="submit-status" class="field-help" role="status"></p>
+          <% } %>
         </aside>
       </div>
     </form>

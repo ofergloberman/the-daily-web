@@ -4,7 +4,10 @@
 
   const status = document.getElementById('save-status');
   const retry = document.getElementById('retry-save');
+  const submitButton = document.getElementById('submit-button');
+  const submitStatus = document.getElementById('submit-status');
   const fields = ['title', 'summary', 'body', 'category', 'imageUrl'];
+  const requiredForSubmit = ['title', 'summary', 'body', 'category'];
   let version = 0;
   let savedVersion = 0;
   let saving = false;
@@ -15,6 +18,12 @@
     status.textContent = message;
     status.parentElement.dataset.state = state;
     retry.hidden = !retryable;
+  }
+
+  function updateSubmitAvailability() {
+    if (!submitButton) return;
+    const complete = requiredForSubmit.every(field => form.elements[field].value.trim().length > 0);
+    submitButton.disabled = !complete;
   }
 
   async function save() {
@@ -48,13 +57,34 @@
     }
   }
 
+  async function submit() {
+    if (!submitButton || submitButton.disabled || authExpired) return;
+    submitButton.disabled = true;
+    submitStatus.textContent = 'Submitting…';
+    try {
+      if (version > savedVersion) await save();
+      const response = await fetch(form.dataset.submitUrl, { method: 'POST', credentials: 'same-origin' });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.message || 'This article could not be submitted.');
+      }
+      submitStatus.textContent = 'Submitted for review.';
+      window.location.href = '/reporter';
+    } catch (error) {
+      submitStatus.textContent = error.message || 'This article could not be submitted.';
+      updateSubmitAvailability();
+    }
+  }
+
   form.addEventListener('input', () => {
     version += 1;
     setStatus('Unsaved changes', 'dirty');
+    updateSubmitAvailability();
     clearTimeout(timer);
     timer = setTimeout(save, 800);
   });
   retry.addEventListener('click', save);
+  if (submitButton) submitButton.addEventListener('click', submit);
   setInterval(() => { if (version > savedVersion && !saving && !authExpired) save(); }, 5000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); });
   window.addEventListener('beforeunload', event => {

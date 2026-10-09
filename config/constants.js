@@ -21,6 +21,11 @@ const DRAFT_EDITABLE_FIELDS = Object.freeze(['title', 'summary', 'body', 'catego
 // imageUrl is intentionally excluded: it stays optional.
 const REQUIRED_SUBMIT_FIELDS = Object.freeze(['title', 'summary', 'body', 'category']);
 
+// Maximum string length accepted for each DRAFT_EDITABLE_FIELDS entry. The
+// Article content schema does not enforce maxlength on body/imageUrl, so the
+// workflow layer is the only place these limits are checked.
+const DRAFT_FIELD_LIMITS = Object.freeze({ title: 200, summary: 500, body: 50000, category: 80, imageUrl: 2048 });
+
 // HTTP status a controller should respond with for each WorkflowError code.
 const ERROR_HTTP_STATUS = Object.freeze({
   NOT_FOUND: 404,
@@ -34,5 +39,5 @@ const ERROR_HTTP_STATUS = Object.freeze({
 
 module.exports = {
   ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS,
-  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, ERROR_HTTP_STATUS
+  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, ERROR_HTTP_STATUS
 };
