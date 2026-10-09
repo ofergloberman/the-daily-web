@@ -406,6 +406,60 @@ test('approve rejects a non-http(s) imageUrl even if it reached pending via edit
   assert.equal(published.published.imageUrl, '');
 });
 
+test('a full correction cycle on an already-published article: public content stays on the old snapshot through editing, resubmission, and a return, and only the final approved version replaces it in exactly one new event', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'V1', summary: 'S', body: 'B', category: 'World', imageUrl: '' });
+
+  // First publish cycle: draft/pending -> published.
+  await workflow.submitForApproval(created._id, reporter, 0);
+  const firstPublish = await workflow.approve(created._id, editor);
+  assert.equal(firstPublish.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(firstPublish.published.title, 'V1');
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0].kind, 'initial');
+  const originalPublishedAt = firstPublish.publishedAt;
+
+  // Reporter reopens the published article and starts a new draft cycle.
+  // Editing must only ever touch `draft` - the public snapshot must not move.
+  const edited = await workflow.saveDraftContent(created._id, reporter, { title: 'V2 (revision)', baseVersion: firstPublish.draftVersion });
+  assert.equal(edited.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(edited.published.title, 'V1', 'public snapshot must be untouched by a draft edit');
+
+  // Resubmitting a published article moves it back to pending for review -
+  // public content is still the old, approved version throughout.
+  const resubmitted = await workflow.submitForApproval(created._id, reporter, edited.draftVersion);
+  assert.equal(resubmitted.status, ARTICLE_STATUSES.PENDING);
+  assert.equal(resubmitted.published.title, 'V1');
+
+  // Editor sends it back with a correction note instead of approving.
+  const returned = await workflow.returnForCorrections(created._id, editor, 'Please add a source for this claim.');
+  assert.equal(returned.status, ARTICLE_STATUSES.RETURNED);
+  assert.equal(returned.editorNote, 'Please add a source for this claim.');
+  assert.equal(returned.published.title, 'V1', 'public snapshot must survive a return-for-corrections too');
+
+  // Reporter addresses the note and resubmits again.
+  const corrected = await workflow.saveDraftContent(created._id, reporter, { title: 'V2 (with source)', baseVersion: returned.draftVersion });
+  assert.equal(corrected.published.title, 'V1');
+  const resubmittedAgain = await workflow.submitForApproval(created._id, reporter, corrected.draftVersion);
+  assert.equal(resubmittedAgain.status, ARTICLE_STATUSES.PENDING);
+  assert.equal(resubmittedAgain.published.title, 'V1');
+
+  // Only now, on approval, does the public snapshot change - to exactly the
+  // reviewed draft, via exactly one additional PublicationEvent.
+  const secondPublish = await workflow.approve(created._id, editor);
+  assert.equal(secondPublish.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(secondPublish.published.title, 'V2 (with source)');
+  assert.equal(secondPublish.editorNote, '', 'the correction note is cleared once the revision is approved');
+  assert.equal(db.events.length, 2);
+  assert.equal(db.events[1].kind, 'update');
+  assert.equal(new Date(secondPublish.publishedAt).getTime(), new Date(originalPublishedAt).getTime(), 'publishedAt tracks the first publish, not each update');
+  assert.ok(new Date(secondPublish.lastPublishedAt).getTime() >= new Date(originalPublishedAt).getTime());
+  assert.equal(secondPublish.currentPublication, db.events[1]._id);
+});
+
 test('deleteArticle cascades Comments, PublicationEvents, and ViewStatistics before the Article, and is Editor-only', async t => {
   const db = makeDb();
   const calls = [];
