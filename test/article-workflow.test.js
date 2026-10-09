@@ -18,8 +18,13 @@ function makeDb() {
 
 function matchesArticle(doc, filter) {
   for (const [key, value] of Object.entries(filter)) {
-    if (value && typeof value === 'object' && '$ne' in value) {
+    if (key === '$or') {
+      if (!value.some(sub => matchesArticle(doc, sub))) return false;
+    } else if (value && typeof value === 'object' && '$ne' in value) {
       if (doc[key] === value.$ne) return false;
+    } else if (value && typeof value === 'object' && '$exists' in value) {
+      const present = Object.prototype.hasOwnProperty.call(doc, key) && doc[key] !== undefined;
+      if (present !== value.$exists) return false;
     } else if (doc[key] !== value) {
       return false;
     }
@@ -126,6 +131,18 @@ test('assertTransition and isContentComplete enforce the status machine', () => 
   assert.equal(workflow.isContentComplete({}), false);
 });
 
+test('isValidImageUrl accepts blank or well-formed http(s) addresses and rejects everything else', () => {
+  assert.equal(workflow.isValidImageUrl(''), true);
+  assert.equal(workflow.isValidImageUrl('   '), true);
+  assert.equal(workflow.isValidImageUrl(undefined), true);
+  assert.equal(workflow.isValidImageUrl('https://example.com/photo.jpg'), true);
+  assert.equal(workflow.isValidImageUrl('http://example.com/photo.jpg'), true);
+  assert.equal(workflow.isValidImageUrl('https://'), false);
+  assert.equal(workflow.isValidImageUrl('unfinished image URL'), false);
+  assert.equal(workflow.isValidImageUrl('javascript:alert(1)'), false);
+  assert.equal(workflow.isValidImageUrl('ftp://example.com/photo.jpg'), false);
+});
+
 test('getPublicProjection exposes only the approved snapshot', () => {
   assert.equal(workflow.getPublicProjection({ published: null }), null);
   assert.equal(workflow.getPublicProjection(null), null);
@@ -219,6 +236,7 @@ test('saveDraftContent rejects a stale baseVersion so out-of-order writes cannot
     { code: 'STALE_DRAFT' }
   );
   assert.equal(error.latest.draftVersion, 1);
+  assert.equal(error.latest.draft.title, 'first');
   const current = await workflow.getOwnArticle(created._id, reporter);
   assert.equal(current.draft.title, 'first');
   assert.equal(current.draftVersion, 1);
@@ -229,22 +247,64 @@ test('saveDraftContent rejects a stale baseVersion so out-of-order writes cannot
   assert.equal(afterRetry.draftVersion, 2);
 });
 
-test('submitForApproval requires complete content and a valid transition', async t => {
+test('saveDraftContent accepts baseVersion 0 for a legacy article that never had draftVersion physically stored', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter);
+
+  // Simulate a document written before the draftVersion field existed: the
+  // real MongoDB row has no such key at all (Mongoose's schema `default: 0`
+  // only applies at hydration time, in memory - it never backfills already
+  // -persisted documents). A bare `{ draftVersion: 0 }` filter would not
+  // match this, since MongoDB only treats a query for `null` as matching
+  // "absent", not a query for the literal number 0.
+  delete db.articles.find(a => a._id === created._id).draftVersion;
+
+  const updated = await workflow.saveDraftContent(created._id, reporter, { title: 'first save on a legacy row', baseVersion: 0 });
+  assert.equal(updated.draft.title, 'first save on a legacy row');
+  assert.equal(updated.draftVersion, 1);
+
+  // Once backfilled, ordinary version matching resumes as normal.
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'stale retry', baseVersion: 0 }),
+    { code: 'STALE_DRAFT' }
+  );
+});
+
+test('submitForApproval requires complete content, a valid image URL, and a valid transition', async t => {
   const db = makeDb();
   installMocks(t, db);
   const reporter = { id: newId(), role: ROLES.REPORTER };
   const created = await workflow.createDraft(reporter, { title: 'T' });
 
-  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INCOMPLETE_CONTENT' });
-  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World', baseVersion: 0 });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 0), { code: 'INCOMPLETE_CONTENT' });
+  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World', imageUrl: 'https://', baseVersion: 0 });
 
-  const submitted = await workflow.submitForApproval(created._id, reporter);
+  // A missing/invalid baseVersion is rejected before any content check.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INVALID_CONTENT' });
+
+  // An unfinished/non-http(s) imageUrl blocks submission even though content
+  // is otherwise complete - autosave allows it, submission must not.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 1), { code: 'INVALID_CONTENT' });
+  await workflow.saveDraftContent(created._id, reporter, { imageUrl: 'javascript:alert(1)', baseVersion: 1 });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 2), { code: 'INVALID_CONTENT' });
+
+  await workflow.saveDraftContent(created._id, reporter, { imageUrl: 'https://example.com/photo.jpg', baseVersion: 2 });
+
+  // A stale baseVersion at submission time is rejected as a conflict, same
+  // as saveDraftContent - the completeness/imageUrl checks above only read
+  // the draft once, so without this a concurrent save landing afterward
+  // could get silently approved for submission unseen.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 2), { code: 'STALE_DRAFT' });
+
+  const submitted = await workflow.submitForApproval(created._id, reporter, 3);
   assert.equal(submitted.status, ARTICLE_STATUSES.PENDING);
-  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INVALID_TRANSITION' });
-  await assert.rejects(workflow.submitForApproval(created._id, { id: newId(), role: ROLES.REPORTER }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 3), { code: 'INVALID_TRANSITION' });
+  await assert.rejects(workflow.submitForApproval(created._id, { id: newId(), role: ROLES.REPORTER }, 3), { code: 'NOT_FOUND' });
 });
 
-test('editAsEditor requires the editor role and does not change status', async t => {
+test('editAsEditor requires the editor role, does not change status, and advances draftVersion like saveDraftContent', async t => {
   const db = makeDb();
   installMocks(t, db);
   const reporter = { id: newId(), role: ROLES.REPORTER };
@@ -255,7 +315,22 @@ test('editAsEditor requires the editor role and does not change status', async t
   const edited = await workflow.editAsEditor(created._id, editor, { title: 'Edited by editor' });
   assert.equal(edited.draft.title, 'Edited by editor');
   assert.equal(edited.status, ARTICLE_STATUSES.DRAFT);
+  assert.equal(edited.draftVersion, 1);
   await assert.rejects(workflow.editAsEditor(newId(), editor, { title: 'x' }), { code: 'NOT_FOUND' });
+
+  // A Reporter holding the baseVersion from before the Editor's edit must be
+  // rejected, not silently overwrite the Editor's change - editAsEditor has
+  // to advance the same counter saveDraftContent checks.
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'Reporter overwrite attempt', baseVersion: 0 }),
+    { code: 'STALE_DRAFT' }
+  );
+  const current = await workflow.getOwnArticle(created._id, reporter);
+  assert.equal(current.draft.title, 'Edited by editor');
+
+  const afterReporterSave = await workflow.saveDraftContent(created._id, reporter, { title: 'Reporter retry', baseVersion: 1 });
+  assert.equal(afterReporterSave.draft.title, 'Reporter retry');
+  assert.equal(afterReporterSave.draftVersion, 2);
 });
 
 test('returnForCorrections requires a note and only applies to pending articles', async t => {
@@ -267,7 +342,7 @@ test('returnForCorrections requires a note and only applies to pending articles'
 
   await assert.rejects(workflow.returnForCorrections(created._id, editor, '   '), { code: 'NOTE_REQUIRED' });
   await assert.rejects(workflow.returnForCorrections(created._id, editor, 'Needs work'), { code: 'INVALID_TRANSITION' });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.submitForApproval(created._id, reporter, 0);
 
   const returned = await workflow.returnForCorrections(created._id, editor, 'Needs work');
   assert.equal(returned.status, ARTICLE_STATUSES.RETURNED);
@@ -283,7 +358,7 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   const created = await workflow.createDraft(reporter, { title: 'V1', summary: 'S', body: 'B', category: 'World' });
 
   await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_TRANSITION' });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.submitForApproval(created._id, reporter, 0);
   await assert.rejects(workflow.approve(created._id, reporter), { code: 'FORBIDDEN' });
 
   const published = await workflow.approve(created._id, editor);
@@ -304,12 +379,31 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   assert.equal(db.events.length, 1);
 
   await workflow.saveDraftContent(created._id, reporter, { title: 'V2', baseVersion: 0 });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.submitForApproval(created._id, reporter, 1);
   const updatedArticle = await workflow.approve(created._id, editor);
   assert.equal(updatedArticle.published.title, 'V2');
   assert.equal(db.events.length, 2);
   assert.equal(db.events[1].kind, 'update');
   assert.equal(new Date(updatedArticle.publishedAt).getTime(), new Date(published.publishedAt).getTime());
+});
+
+test('approve rejects a non-http(s) imageUrl even if it reached pending via editAsEditor after submission', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'T', summary: 'S', body: 'B', category: 'World' });
+  await workflow.submitForApproval(created._id, reporter, 0);
+
+  // editAsEditor bypasses submission's validation entirely (no status
+  // change, direct content edit) - approve() must catch a bad value here too.
+  await workflow.editAsEditor(created._id, editor, { imageUrl: 'javascript:alert(1)' });
+  await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_CONTENT' });
+  assert.equal(db.events.length, 0);
+
+  await workflow.editAsEditor(created._id, editor, { imageUrl: '' });
+  const published = await workflow.approve(created._id, editor);
+  assert.equal(published.published.imageUrl, '');
 });
 
 test('deleteArticle cascades Comments, PublicationEvents, and ViewStatistics before the Article, and is Editor-only', async t => {

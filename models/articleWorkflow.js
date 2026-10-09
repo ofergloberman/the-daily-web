@@ -41,6 +41,24 @@ function isContentComplete(content) {
 }
 
 /**
+ * True when `imageUrl` is acceptable to publish: either blank (it's optional,
+ * per DRAFT_EDITABLE_FIELDS/REQUIRED_SUBMIT_FIELDS) or a well-formed absolute
+ * http(s) URL. Autosave (saveDraftContent/editAsEditor) deliberately does
+ * NOT call this - an in-progress draft may hold an unfinished URL (e.g.
+ * `https://`) while the Reporter is still typing. It is enforced only at the
+ * two points that can expose a value publicly: submitForApproval and approve.
+ */
+function isValidImageUrl(imageUrl) {
+  const trimmed = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+  if (trimmed === '') return true;
+  try {
+    return ['http:', 'https:'].includes(new URL(trimmed).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Public-safe shape of an article, or null if it has never been approved.
  * Always sourced from `article.published`, never `article.draft`.
  * @param {object} article - an Article document or lean object with at least
@@ -193,7 +211,11 @@ function listOwnArticlesQuery(user, { status } = {}) {
  * carrying a stale version - delayed on the network, or superseded by
  * another tab/device that saved first - is rejected with
  * WorkflowError('STALE_DRAFT') instead of overwriting the newer content.
- * `error.latest = { draftVersion }` is attached so the caller can resync.
+ * `error.latest = { draftVersion, draft }` is attached (the full current
+ * draft snapshot, not just the version) so the caller can merge field-by-
+ * field - adopting the server's value only for fields it never touched -
+ * instead of blindly resending its whole stale local form over the top of
+ * someone else's newer, non-conflicting edits.
  * @param {string} articleId
  * @param {{id: string, role: string}} user
  * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>> & {baseVersion: number}} patch
@@ -209,8 +231,16 @@ async function saveDraftContent(articleId, user, patch) {
   const current = await Article.findOne(filter);
   if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
   if (current.status === ARTICLE_STATUSES.PENDING) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
+  // Articles created before draftVersion existed never had it written to
+  // MongoDB - Mongoose's schema `default: 0` only applies on hydration, in
+  // memory, it does not backfill the stored document. A bare equality match
+  // on 0 would therefore never hit those rows and every first save would be
+  // wrongly treated as stale. Querying for 0 must also accept "field absent".
+  const versionFilter = baseVersion === 0
+    ? { $or: [{ draftVersion: 0 }, { draftVersion: { $exists: false } }] }
+    : { draftVersion: baseVersion };
   const updated = await guardWrite(() => Article.findOneAndUpdate(
-    { ...filter, status: { $ne: ARTICLE_STATUSES.PENDING }, draftVersion: baseVersion },
+    { ...filter, status: { $ne: ARTICLE_STATUSES.PENDING }, ...versionFilter },
     { $set: set, $inc: { draftVersion: 1 } }, { new: true, runValidators: true }
   ));
   if (updated) return updated;
@@ -218,34 +248,59 @@ async function saveDraftContent(articleId, user, patch) {
   if (!latest) throw new WorkflowError('NOT_FOUND', 'Article not found.');
   if (latest.status === ARTICLE_STATUSES.PENDING) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
   const error = new WorkflowError('STALE_DRAFT', 'Newer changes were already saved from another session. Reload the latest draft before retrying.');
-  error.latest = { draftVersion: latest.draftVersion };
+  error.latest = { draftVersion: latest.draftVersion, draft: snapshotFromDraft(latest.draft) };
   throw error;
 }
 
 /**
  * Reporter-only. `draft/returned/published -> pending`. Throws
  * WorkflowError('INCOMPLETE_CONTENT') unless isContentComplete(article.draft).
+ * Throws WorkflowError('INVALID_CONTENT') if a non-blank imageUrl is not a
+ * well-formed http(s) URL (see isValidImageUrl) - it must not be possible to
+ * submit an unfinished or non-http(s) image URL toward approval. Requires
+ * `baseVersion` (the draftVersion the client last saw, same contract as
+ * saveDraftContent) and includes it in the conditional status update: the
+ * completeness/image-URL checks above run against one read of the draft, so
+ * without this a concurrent save landing between that read and the update
+ * could change the content (to something incomplete, or with a bad
+ * imageUrl) and still get silently marked pending. A version mismatch is
+ * reported as WorkflowError('STALE_DRAFT') with the latest draft attached,
+ * same as saveDraftContent, so the caller can refresh before retrying.
  * @param {string} articleId
  * @param {{id: string, role: string}} user
+ * @param {number} baseVersion
  * @returns {Promise<import('./Article')>}
  */
-async function submitForApproval(articleId, user) {
+async function submitForApproval(articleId, user, baseVersion) {
   requireRole(user, ROLES.REPORTER);
   const id = requireValidId(articleId);
+  const version = requireBaseVersion({ baseVersion });
   const current = await Article.findOne({ _id: id, author: user.id });
   if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
   assertTransition(current.status, ARTICLE_STATUSES.PENDING);
   if (!isContentComplete(current.draft)) throw new WorkflowError('INCOMPLETE_CONTENT', 'Title, summary, body, and category are required before submission.');
+  if (!isValidImageUrl(current.draft.imageUrl)) throw new WorkflowError('INVALID_CONTENT', 'Image URL must be a public http or https address, or left blank.');
+  const versionFilter = version === 0
+    ? { $or: [{ draftVersion: 0 }, { draftVersion: { $exists: false } }] }
+    : { draftVersion: version };
   const updated = await guardWrite(() => Article.findOneAndUpdate(
-    { _id: id, author: user.id, status: current.status },
+    { _id: id, author: user.id, status: current.status, ...versionFilter },
     { $set: { status: ARTICLE_STATUSES.PENDING } }, { new: true, runValidators: true }
   ));
-  if (!updated) throw new WorkflowError('INVALID_TRANSITION', 'This article was already changed by another request.');
-  return updated;
+  if (updated) return updated;
+  const latest = await Article.findOne({ _id: id, author: user.id });
+  if (!latest) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  if (latest.status !== current.status) throw new WorkflowError('INVALID_TRANSITION', 'This article was already changed by another request.');
+  const error = new WorkflowError('STALE_DRAFT', 'Newer changes were already saved from another session. Reload the latest draft before submitting.');
+  error.latest = { draftVersion: latest.draftVersion, draft: snapshotFromDraft(latest.draft) };
+  throw error;
 }
 
 /**
- * Editor-only direct content edit. No status change.
+ * Editor-only direct content edit. No status change. Bumps `draftVersion`
+ * the same way saveDraftContent does, so a Reporter holding a stale
+ * baseVersion (from before this edit) is rejected by the STALE_DRAFT guard
+ * instead of overwriting the Editor's change.
  * @param {string} articleId
  * @param {{id: string, role: string}} user
  * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>>} patch
@@ -256,7 +311,7 @@ async function editAsEditor(articleId, user, patch) {
   const id = requireValidId(articleId);
   const set = buildDraftSet(patch);
   const updated = await guardWrite(() => Article.findOneAndUpdate(
-    { _id: id }, { $set: set }, { new: true, runValidators: true }
+    { _id: id }, { $set: set, $inc: { draftVersion: 1 } }, { new: true, runValidators: true }
   ));
   if (!updated) throw new WorkflowError('NOT_FOUND', 'Article not found.');
   return updated;
@@ -289,6 +344,11 @@ async function returnForCorrections(articleId, user, note) {
  * Editor-only. `pending -> published`. Copies `draft` into `published`
  * atomically, creates exactly one PublicationEvent (`kind: 'initial'` the
  * first time, `'update'` afterwards), and sets `currentPublication`.
+ * Throws WorkflowError('INVALID_CONTENT') if the draft's imageUrl is
+ * non-blank and not a well-formed http(s) URL - a second, defense-in-depth
+ * check (submitForApproval already enforces this) since editAsEditor can
+ * change `draft.imageUrl` while an article is pending, after submission's
+ * check already ran.
  * Transactional: requires a replica-set MongoDB connection (see
  * docs/ARTICLE_CONTRACT.md §7). The write that flips status away from
  * `pending` is conditional on the status still being `pending`, so a racing
@@ -307,6 +367,7 @@ async function approve(articleId, user) {
       const current = await Article.findById(id).session(session);
       if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
       assertTransition(current.status, ARTICLE_STATUSES.PUBLISHED);
+      if (!isValidImageUrl(current.draft.imageUrl)) throw new WorkflowError('INVALID_CONTENT', 'Image URL must be a public http or https address, or left blank.');
       const publishedAt = new Date();
       const kind = current.publishedAt ? 'update' : 'initial';
       const [event] = await PublicationEvent.create([{ article: current._id, editor: user.id, publishedAt, kind }], { session });
@@ -362,6 +423,7 @@ module.exports = {
   WorkflowError,
   assertTransition,
   isContentComplete,
+  isValidImageUrl,
   getPublicProjection,
   createDraft,
   getOwnArticle,

@@ -21,6 +21,11 @@ function sendWorkflowError(res, error) {
   return true;
 }
 
+/** An article is submittable once its required fields are complete AND any imageUrl is a well-formed http(s) address. */
+function canSubmit(article) {
+  return workflow.isContentComplete(article.draft) && workflow.isValidImageUrl(article.draft?.imageUrl);
+}
+
 function publicArticle(article) {
   return {
     id: String(article._id),
@@ -30,7 +35,7 @@ function publicArticle(article) {
       title: article.draft?.title || '', summary: article.draft?.summary || '', body: article.draft?.body || '',
       category: article.draft?.category || '', imageUrl: article.draft?.imageUrl || ''
     },
-    canSubmit: workflow.isContentComplete(article.draft),
+    canSubmit: canSubmit(article),
     draftVersion: article.draftVersion,
     updatedAt: article.updatedAt
   };
@@ -86,7 +91,7 @@ async function editArticle(req, res, next) {
   try {
     const article = await workflow.getOwnArticle(req.params.id, actor(req));
     const locked = article.status === ARTICLE_STATUSES.PENDING;
-    res.render('reporterEditor', { user: req.user, article, locked, canSubmit: !locked && workflow.isContentComplete(article.draft) });
+    res.render('reporterEditor', { user: req.user, article, locked, canSubmit: !locked && canSubmit(article) });
   } catch (error) {
     if (sendWorkflowError(res, error)) return;
     next(error);
@@ -105,7 +110,7 @@ async function saveDraft(req, res, next) {
 
 async function submitArticle(req, res, next) {
   try {
-    const article = await workflow.submitForApproval(req.params.id, actor(req));
+    const article = await workflow.submitForApproval(req.params.id, actor(req), (req.body || {}).baseVersion);
     if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, '/reporter');
     res.json({ article: publicArticle(article) });
   } catch (error) {

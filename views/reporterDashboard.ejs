@@ -16,16 +16,16 @@
       <div><p class="section-label">Reporter workspace</p><h1>Your articles</h1><p class="intro-copy">Pick up a draft or start a new story. Your draft work stays private until it enters review.</p></div>
       <form method="post" action="/reporter/articles"><button class="primary-button" type="submit">Create new article</button></form>
     </div>
-    <% if (!articles.length) { %>
-      <section class="empty-state"><h2><%= page === 1 ? 'No articles yet' : 'No more articles' %></h2><p><%= page === 1 ? 'Create an article to begin writing. Your changes will save as you work.' : 'Return to the previous page to see your articles.' %></p><% if (page > 1) { %><a href="/reporter?page=<%= page - 1 %><%= status ? `&status=${status}` : '' %>">Previous page</a><% } %></section>
-    <% } else { %>
-      <section aria-labelledby="article-list-title">
-        <div class="list-heading"><h2 id="article-list-title">Article list</h2><span>Page <%= page %></span></div>
-        <nav class="status-tabs" aria-label="Filter by status">
-          <% [['', 'All'], ['draft', 'Draft'], ['pending', 'Pending review'], ['published', 'Published'], ['returned', 'Returned']].forEach(([value, label]) => { %>
-            <a class="<%= status === value ? 'active' : '' %>" href="/reporter<%= value ? `?status=${value}` : '' %>"><%= label %></a>
-          <% }) %>
-        </nav>
+    <section aria-labelledby="article-list-title">
+      <div class="list-heading"><h2 id="article-list-title">Article list</h2><span>Page <%= page %></span></div>
+      <nav class="status-tabs" aria-label="Filter by status">
+        <% [['', 'All'], ['draft', 'Draft'], ['pending', 'Pending review'], ['published', 'Published'], ['returned', 'Returned']].forEach(([value, label]) => { %>
+          <a class="<%= status === value ? 'active' : '' %>"<% if (status === value) { %> aria-current="page"<% } %> href="/reporter<%= value ? `?status=${value}` : '' %>"><%= label %></a>
+        <% }) %>
+      </nav>
+      <% if (!articles.length) { %>
+        <div class="empty-state"><h2><%= page === 1 ? 'No articles yet' : 'No more articles' %></h2><p><%= page === 1 ? 'Create an article to begin writing. Your changes will save as you work.' : 'Return to the previous page to see your articles.' %></p><% if (page > 1) { %><a href="/reporter?page=<%= page - 1 %><%= status ? `&status=${status}` : '' %>">Previous page</a><% } %></div>
+      <% } else { %>
         <div class="article-list">
           <% articles.forEach(article => { %>
             <article class="article-row">
@@ -47,8 +47,8 @@
           <% if (page > 1) { %><a href="/reporter?page=<%= page - 1 %><%= status ? `&status=${status}` : '' %>">Previous page</a><% } %>
           <% if (hasNext) { %><a href="/reporter?page=<%= page + 1 %><%= status ? `&status=${status}` : '' %>">Next page</a><% } %>
         </nav>
-      </section>
-    <% } %>
+      <% } %>
+    </section>
   </main>
 </body>
 </html>

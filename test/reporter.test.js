@@ -7,13 +7,21 @@ const Session = require('../models/Session');
 const { hashToken } = require('../middleware/auth');
 
 // Generic in-memory filter matcher supporting the shapes articleWorkflow.js
-// issues: exact field equality (including ObjectId/string coercion) and
-// `{ $ne: value }` for the pending-lock guard in saveDraftContent.
+// issues: exact field equality (including ObjectId/string coercion),
+// `{ $ne: value }` for the pending-lock guard, and `$or`/`{ $exists }` for
+// the legacy-document draftVersion fallback in saveDraftContent.
 function matches(doc, filter) {
   for (const [key, value] of Object.entries(filter)) {
+    if (key === '$or') {
+      if (!value.some(sub => matches(doc, sub))) return false;
+      continue;
+    }
     const actual = key === '_id' ? String(doc._id) : key === 'author' ? String(doc.author) : doc[key];
     if (value && typeof value === 'object' && '$ne' in value) {
       if (String(actual) === String(value.$ne)) return false;
+    } else if (value && typeof value === 'object' && '$exists' in value) {
+      const present = actual !== undefined;
+      if (present !== value.$exists) return false;
     } else if (String(actual) !== String(value)) {
       return false;
     }
@@ -103,7 +111,10 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   const patch = (token, id, body) => fetch(`${base}/reporter/articles/${id}/draft`, {
     method: 'PATCH', headers: { ...headers(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
-  const submit = (token, id) => fetch(`${base}/reporter/articles/${id}/submit`, { method: 'POST', headers: headers(token) });
+  const submit = (token, id, baseVersion) => fetch(`${base}/reporter/articles/${id}/submit`, {
+    method: 'POST', headers: { ...headers(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseVersion: baseVersion ?? draftVersion })
+  });
 
   // Every saveDraftContent write bumps the article's draftVersion by one; the
   // client must echo back the version it last saw as `baseVersion`. Track it
@@ -181,7 +192,37 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   const staleBody = await staleResponse.json();
   assert.equal(staleBody.error, 'STALE_DRAFT');
   assert.equal(staleBody.latest.draftVersion, draftVersion);
+  assert.equal(staleBody.latest.draft.title, 'News');
   assert.equal(articles[0].draft.title, 'News');
+
+  // A non-http(s)/unfinished imageUrl blocks submission even though every
+  // required field is complete - draft saving deliberately allows it, but it
+  // must never be possible to submit (and later publish) a bad image URL.
+  for (const imageUrl of ['javascript:alert(1)', 'https://', 'unfinished image URL']) {
+    assert.equal((await patch(tokens.a, articleId, withVersion({ imageUrl }))).status, 200);
+    draftVersion += 1;
+    assert.equal((await submit(tokens.a, articleId)).status, 400);
+    assert.equal(articles[0].status, 'draft');
+  }
+  assert.equal((await patch(tokens.a, articleId, withVersion({ imageUrl: full.imageUrl }))).status, 200);
+  draftVersion += 1;
+
+  // A missing/invalid baseVersion is rejected before any ownership or state check.
+  assert.equal((await fetch(`${base}/reporter/articles/${articleId}/submit`, {
+    method: 'POST', headers: { ...headers(tokens.a), 'Content-Type': 'application/json' }, body: JSON.stringify({})
+  })).status, 400);
+  // A submission request sent with no body at all must not crash the server.
+  assert.equal((await fetch(`${base}/reporter/articles/${articleId}/submit`, { method: 'POST', headers: headers(tokens.a) })).status, 400);
+
+  // A stale baseVersion at submission time is rejected as a conflict rather
+  // than silently approving content the client never actually saw (e.g. if
+  // another session changed it between this tab's last read and submit).
+  const staleSubmit = await submit(tokens.a, articleId, draftVersion - 1);
+  assert.equal(staleSubmit.status, 409);
+  const staleSubmitBody = await staleSubmit.json();
+  assert.equal(staleSubmitBody.error, 'STALE_DRAFT');
+  assert.equal(staleSubmitBody.latest.draftVersion, draftVersion);
+  assert.equal(articles[0].status, 'draft');
 
   // Submission: ownership, success, and re-submission while already pending.
   assert.equal((await submit(tokens.b, articleId)).status, 404);
@@ -206,6 +247,15 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   assert.equal(draftJson.articles.length, 1);
   assert.equal(draftJson.articles[0].id, secondId);
   assert.equal((await fetch(`${base}/reporter?status=bogus`, { headers: headers(tokens.a) })).status, 400);
+
+  // The status filter tabs must stay visible (so the reporter can navigate
+  // back to "All") even when the chosen filter has zero matching articles,
+  // and the active tab must be exposed to assistive tech via aria-current.
+  const publishedPage = await fetch(`${base}/reporter?status=published`, { headers: headers(tokens.a) }).then(r => r.text());
+  assert.ok(publishedPage.includes('No articles yet'));
+  assert.ok(publishedPage.includes('status-tabs'));
+  assert.ok(publishedPage.includes('href="/reporter">All</a>'));
+  assert.match(publishedPage, /class="active" aria-current="page" href="\/reporter\?status=published"/);
 
   // Correction-note display on the dashboard.
   articles[0].editorNote = 'Please add a source.';
