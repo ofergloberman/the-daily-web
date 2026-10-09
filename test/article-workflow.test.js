@@ -7,13 +7,14 @@ const Comment = require('../models/Comment');
 const ViewStatistic = require('../models/ViewStatistic');
 const workflow = require('../models/articleWorkflow');
 const { ARTICLE_STATUSES, ROLES } = require('../config/constants');
+const { draftArticleFixture } = require('./fixtures/articles');
 
 function newId() {
   return new mongoose.Types.ObjectId().toString();
 }
 
 function makeDb() {
-  return { articles: [], events: [] };
+  return { articles: [], events: [], comments: [], viewStatistics: [] };
 }
 
 function matchesArticle(doc, filter) {
@@ -100,10 +101,26 @@ function installMocks(t, db, calls = []) {
   });
 
   t.mock.method(PublicationEvent, 'deleteMany', filter => ({
-    session: async () => { calls.push('publicationEvents'); db.events = db.events.filter(e => e.article !== filter.article); }
+    session: async () => {
+      calls.push('publicationEvents');
+      if (db.failOn === 'publicationEvents') throw new Error('Simulated transient failure deleting publication events.');
+      db.events = db.events.filter(e => e.article !== filter.article);
+    }
   }));
-  t.mock.method(Comment, 'deleteMany', () => ({ session: async () => { calls.push('comments'); } }));
-  t.mock.method(ViewStatistic, 'deleteMany', () => ({ session: async () => { calls.push('viewStatistics'); } }));
+  t.mock.method(Comment, 'deleteMany', filter => ({
+    session: async () => {
+      calls.push('comments');
+      if (db.failOn === 'comments') throw new Error('Simulated transient failure deleting comments.');
+      db.comments = db.comments.filter(c => c.article !== filter.article);
+    }
+  }));
+  t.mock.method(ViewStatistic, 'deleteMany', filter => ({
+    session: async () => {
+      calls.push('viewStatistics');
+      if (db.failOn === 'viewStatistics') throw new Error('Simulated transient failure deleting view statistics.');
+      db.viewStatistics = db.viewStatistics.filter(v => v.article !== filter.article);
+    }
+  }));
 
   // Transactions snapshot/restore the shared store so a throwing callback
   // rolls back every write it made, mirroring session.withTransaction().
@@ -115,6 +132,8 @@ function installMocks(t, db, calls = []) {
       } catch (error) {
         db.articles = before.articles;
         db.events = before.events;
+        db.comments = before.comments;
+        db.viewStatistics = before.viewStatistics;
         throw error;
       }
     },
@@ -468,10 +487,82 @@ test('deleteArticle cascades Comments, PublicationEvents, and ViewStatistics bef
   const editor = { id: newId(), role: ROLES.EDITOR };
   const created = await workflow.createDraft(reporter);
 
+  // Associated records a real deployment would have accumulated: a comment,
+  // a publication event, and a view-count bucket. deleteArticle must remove
+  // all of them, not just the Article document itself.
+  db.comments.push({ _id: newId(), article: created._id, body: 'Nice piece.' });
+  db.events.push({ _id: newId(), article: created._id, kind: 'initial' });
+  db.viewStatistics.push({ _id: newId(), article: created._id, minute: new Date(0), count: 3 });
+  // An unrelated article's records must survive untouched - the delete is
+  // scoped to this article's _id only.
+  const otherId = newId();
+  db.comments.push({ _id: newId(), article: otherId, body: 'Unrelated.' });
+
   await assert.rejects(workflow.deleteArticle(created._id, reporter), { code: 'FORBIDDEN' });
   await assert.rejects(workflow.deleteArticle(newId(), editor), { code: 'NOT_FOUND' });
 
   await workflow.deleteArticle(created._id, editor);
   assert.deepEqual(calls, ['comments', 'publicationEvents', 'viewStatistics', 'article']);
   assert.equal(db.articles.some(a => a._id === created._id), false);
+  assert.equal(db.comments.some(c => c.article === created._id), false);
+  assert.equal(db.events.some(e => e.article === created._id), false);
+  assert.equal(db.viewStatistics.some(v => v.article === created._id), false);
+  // The other article's comment was not touched by this cascade.
+  assert.equal(db.comments.some(c => c.article === otherId), true);
+});
+
+test('deleteArticle rolls back the entire cascade if any step fails partway through - no partial deletion', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter, draftArticleFixture().draft);
+  db.comments.push({ _id: newId(), article: created._id, body: 'Nice piece.' });
+  db.events.push({ _id: newId(), article: created._id, kind: 'initial' });
+  db.viewStatistics.push({ _id: newId(), article: created._id, minute: new Date(0), count: 1 });
+
+  // Simulate a transient failure (e.g. a dropped connection) partway through
+  // the cascade, after Comments were removed but before PublicationEvents.
+  // withTransaction must roll back everything, including the already-applied
+  // comment deletion - a real MongoDB transaction guarantees this atomically.
+  db.failOn = 'publicationEvents';
+  await assert.rejects(workflow.deleteArticle(created._id, editor));
+  delete db.failOn;
+
+  assert.equal(db.articles.some(a => a._id === created._id), true, 'article must survive a rolled-back delete');
+  assert.equal(db.comments.some(c => c.article === created._id), true, 'comments must be restored by rollback');
+  assert.equal(db.events.some(e => e.article === created._id), true, 'events must be restored by rollback');
+  assert.equal(db.viewStatistics.some(v => v.article === created._id), true, 'view stats must be restored by rollback');
+
+  // With the transient failure cleared, the same delete now succeeds cleanly.
+  await workflow.deleteArticle(created._id, editor);
+  assert.equal(db.articles.some(a => a._id === created._id), false);
+  assert.equal(db.comments.some(c => c.article === created._id), false);
+});
+
+test('a late/delayed request against an already-deleted article is rejected as NOT_FOUND by every workflow operation, never recreating it', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'T', summary: 'S', body: 'B', category: 'World' });
+  const id = created._id;
+
+  await workflow.deleteArticle(id, editor);
+  assert.equal(db.articles.length, 0);
+
+  // Every mutating/read operation a stale client request could still send
+  // must fail cleanly against the now-missing _id, and none of them may
+  // resurrect any document.
+  await assert.rejects(workflow.getOwnArticle(id, reporter), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.saveDraftContent(id, reporter, { title: 'late write', baseVersion: 0 }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.submitForApproval(id, reporter, 0), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.editAsEditor(id, editor, { title: 'late edit' }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.returnForCorrections(id, editor, 'late note'), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.approve(id, editor), { code: 'NOT_FOUND' });
+  // A duplicate/retried delete (e.g. a double-click or a redelivered request)
+  // must not succeed a second time or throw anything other than NOT_FOUND.
+  await assert.rejects(workflow.deleteArticle(id, editor), { code: 'NOT_FOUND' });
+
+  assert.equal(db.articles.length, 0, 'no operation above may have recreated the article');
 });
