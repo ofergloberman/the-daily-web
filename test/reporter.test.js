@@ -22,14 +22,18 @@ function matches(doc, filter) {
 }
 
 function applyUpdate(doc, update) {
-  if (!update.$set) return;
-  for (const [path, value] of Object.entries(update.$set)) {
-    if (path.includes('.')) {
-      const [root, sub] = path.split('.');
-      doc[root][sub] = value;
-    } else {
-      doc[path] = value;
+  if (update.$set) {
+    for (const [path, value] of Object.entries(update.$set)) {
+      if (path.includes('.')) {
+        const [root, sub] = path.split('.');
+        doc[root][sub] = value;
+      } else {
+        doc[path] = value;
+      }
     }
+  }
+  if (update.$inc) {
+    for (const [path, amount] of Object.entries(update.$inc)) doc[path] = (doc[path] || 0) + amount;
   }
   doc.updatedAt = new Date();
 }
@@ -101,6 +105,12 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   });
   const submit = (token, id) => fetch(`${base}/reporter/articles/${id}/submit`, { method: 'POST', headers: headers(token) });
 
+  // Every saveDraftContent write bumps the article's draftVersion by one; the
+  // client must echo back the version it last saw as `baseVersion`. Track it
+  // locally so each call below can supply the correct one.
+  let draftVersion = 0;
+  const withVersion = body => ({ ...body, baseVersion: draftVersion });
+
   assert.equal((await fetch(`${base}/reporter`)).status, 401);
   assert.equal((await fetch(`${base}/reporter`, { headers: headers(tokens.c) })).status, 403);
   assert.equal((await fetch(`${base}/reporter`, { headers: headers(tokens.a) })).status, 200);
@@ -119,18 +129,23 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   // Ownership: another Reporter cannot reach this article by changing the id.
   assert.equal((await fetch(`${base}/reporter/articles/${articleId}/edit`, { headers: headers(tokens.b) })).status, 404);
   assert.equal((await fetch(`${base}/reporter/articles/${articleId}/edit`, { headers: headers(tokens.a) })).status, 200);
-  assert.equal((await patch(tokens.b, articleId, full)).status, 404);
-  assert.equal((await patch(tokens.a, 'bad-id', full)).status, 404);
+  assert.equal((await patch(tokens.b, articleId, withVersion(full))).status, 404);
+  assert.equal((await patch(tokens.a, 'bad-id', withVersion(full))).status, 404);
+
+  // A missing/invalid baseVersion is rejected before any ownership or content check.
+  assert.equal((await patch(tokens.a, articleId, full)).status, 400);
 
   // Unknown body keys are silently ignored, not an error.
-  assert.equal((await patch(tokens.a, articleId, { ...full, status: 'published' })).status, 200);
+  assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, status: 'published' }))).status, 200);
+  draftVersion += 1;
   assert.equal(articles[0].status, 'draft');
 
-  assert.equal((await patch(tokens.a, articleId, { ...full, imageUrl: 'x'.repeat(2049) })).status, 400);
-  assert.equal((await patch(tokens.a, articleId, { ...full, imageUrl: {} })).status, 400);
+  assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, imageUrl: 'x'.repeat(2049) }))).status, 400);
+  assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, imageUrl: {} }))).status, 400);
 
   for (const imageUrl of ['https://', 'unfinished image URL', 'javascript:alert(1)']) {
-    assert.equal((await patch(tokens.a, articleId, { ...full, body: 'Keep my latest writing', imageUrl })).status, 200);
+    assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, body: 'Keep my latest writing', imageUrl }))).status, 200);
+    draftVersion += 1;
     assert.equal(articles[0].draft.body, 'Keep my latest writing');
     assert.equal(articles[0].draft.imageUrl, imageUrl);
     assert.equal(articles[0].published, null);
@@ -141,25 +156,38 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
 
   const limits = { title: 200, summary: 500, body: 50000, category: 80, imageUrl: 2048 };
   for (const [field, limit] of Object.entries(limits)) {
-    assert.equal((await patch(tokens.a, articleId, { ...full, [field]: '' })).status, 200, `${field} may be empty in a draft`);
-    assert.equal((await patch(tokens.a, articleId, { ...full, [field]: 'x'.repeat(limit) })).status, 200, `${field} accepts its limit`);
-    assert.equal((await patch(tokens.a, articleId, { ...full, [field]: 'x'.repeat(limit + 1) })).status, 400, `${field} rejects excess length`);
-    assert.equal((await patch(tokens.a, articleId, { ...full, [field]: 42 })).status, 400, `${field} must be a string`);
+    assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, [field]: '' }))).status, 200, `${field} may be empty in a draft`);
+    draftVersion += 1;
+    assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, [field]: 'x'.repeat(limit) }))).status, 200, `${field} accepts its limit`);
+    draftVersion += 1;
+    assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, [field]: 'x'.repeat(limit + 1) }))).status, 400, `${field} rejects excess length`);
+    assert.equal((await patch(tokens.a, articleId, withVersion({ ...full, [field]: 42 }))).status, 400, `${field} must be a string`);
   }
 
   // A partial patch (missing keys) saves successfully and leaves other fields untouched.
-  assert.equal((await patch(tokens.a, articleId, { title: 'Partial only' })).status, 200);
+  assert.equal((await patch(tokens.a, articleId, withVersion({ title: 'Partial only' }))).status, 200);
+  draftVersion += 1;
   assert.equal(articles[0].draft.title, 'Partial only');
   assert.equal(articles[0].draft.category, full.category);
 
-  assert.equal((await patch(tokens.a, articleId, full)).status, 200);
+  assert.equal((await patch(tokens.a, articleId, withVersion(full))).status, 200);
+  draftVersion += 1;
+  assert.equal(articles[0].draft.title, 'News');
+
+  // A stale/delayed request (old baseVersion) cannot overwrite a newer save -
+  // requests cannot clobber each other out of order.
+  const staleResponse = await patch(tokens.a, articleId, { ...full, title: 'Clobber attempt', baseVersion: draftVersion - 1 });
+  assert.equal(staleResponse.status, 409);
+  const staleBody = await staleResponse.json();
+  assert.equal(staleBody.error, 'STALE_DRAFT');
+  assert.equal(staleBody.latest.draftVersion, draftVersion);
   assert.equal(articles[0].draft.title, 'News');
 
   // Submission: ownership, success, and re-submission while already pending.
   assert.equal((await submit(tokens.b, articleId)).status, 404);
   assert.equal((await submit(tokens.a, articleId)).status, 200);
   assert.equal(articles[0].status, 'pending');
-  assert.equal((await patch(tokens.a, articleId, { title: 'Changed while pending' })).status, 409);
+  assert.equal((await patch(tokens.a, articleId, withVersion({ title: 'Changed while pending' }))).status, 409);
   assert.equal(articles[0].draft.title, 'News');
   assert.equal((await submit(tokens.a, articleId)).status, 409);
 

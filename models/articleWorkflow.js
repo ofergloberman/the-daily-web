@@ -79,6 +79,20 @@ function requireValidId(articleId) {
   return articleId;
 }
 
+/**
+ * Validates the `baseVersion` a client must send with every saveDraftContent
+ * call - the draftVersion it last saw, used as an optimistic-concurrency
+ * token. Required (not merely optional) so a client cannot accidentally skip
+ * the out-of-order-write guard.
+ */
+function requireBaseVersion(patch) {
+  const { baseVersion } = patch || {};
+  if (!Number.isInteger(baseVersion) || baseVersion < 0) {
+    throw new WorkflowError('INVALID_CONTENT', 'A numeric baseVersion is required to save a draft.');
+  }
+  return baseVersion;
+}
+
 /** Picks only DRAFT_EDITABLE_FIELDS keys present in `patch`; validates each is a string. */
 function pickDraftFields(patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
@@ -174,27 +188,38 @@ function listOwnArticlesQuery(user, { status } = {}) {
 /**
  * Autosave. Writes only DRAFT_EDITABLE_FIELDS keys present in `patch`; any
  * other key is ignored. Throws WorkflowError('DRAFT_LOCKED') while
- * `status === 'pending'`.
+ * `status === 'pending'`. Requires `patch.baseVersion` to equal the
+ * article's current `draftVersion` (optimistic concurrency): a request
+ * carrying a stale version - delayed on the network, or superseded by
+ * another tab/device that saved first - is rejected with
+ * WorkflowError('STALE_DRAFT') instead of overwriting the newer content.
+ * `error.latest = { draftVersion }` is attached so the caller can resync.
  * @param {string} articleId
  * @param {{id: string, role: string}} user
- * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>>} patch
+ * @param {Partial<Record<DRAFT_EDITABLE_FIELDS[number], string>> & {baseVersion: number}} patch
  * @returns {Promise<import('./Article')>}
  */
 async function saveDraftContent(articleId, user, patch) {
   requireAnyRole(user, [ROLES.REPORTER, ROLES.EDITOR]);
   const id = requireValidId(articleId);
   const set = buildDraftSet(patch);
+  const baseVersion = requireBaseVersion(patch);
   const filter = { _id: id };
   if (user.role === ROLES.REPORTER) filter.author = user.id;
   const current = await Article.findOne(filter);
   if (!current) throw new WorkflowError('NOT_FOUND', 'Article not found.');
   if (current.status === ARTICLE_STATUSES.PENDING) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
   const updated = await guardWrite(() => Article.findOneAndUpdate(
-    { ...filter, status: { $ne: ARTICLE_STATUSES.PENDING } },
-    { $set: set }, { new: true, runValidators: true }
+    { ...filter, status: { $ne: ARTICLE_STATUSES.PENDING }, draftVersion: baseVersion },
+    { $set: set, $inc: { draftVersion: 1 } }, { new: true, runValidators: true }
   ));
-  if (!updated) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
-  return updated;
+  if (updated) return updated;
+  const latest = await Article.findOne(filter);
+  if (!latest) throw new WorkflowError('NOT_FOUND', 'Article not found.');
+  if (latest.status === ARTICLE_STATUSES.PENDING) throw new WorkflowError('DRAFT_LOCKED', 'This article is awaiting review and cannot be edited.');
+  const error = new WorkflowError('STALE_DRAFT', 'Newer changes were already saved from another session. Reload the latest draft before retrying.');
+  error.latest = { draftVersion: latest.draftVersion };
+  throw error;
 }
 
 /**

@@ -15,7 +15,9 @@ function pageNumber(value) {
 /** Sends the HTTP response for a WorkflowError and returns true, or returns false for any other error. */
 function sendWorkflowError(res, error) {
   if (!(error instanceof workflow.WorkflowError)) return false;
-  res.status(error.status).json({ error: error.code, message: error.message });
+  const body = { error: error.code, message: error.message };
+  if (error.latest) body.latest = error.latest;
+  res.status(error.status).json(body);
   return true;
 }
 
@@ -29,6 +31,7 @@ function publicArticle(article) {
       category: article.draft?.category || '', imageUrl: article.draft?.imageUrl || ''
     },
     canSubmit: workflow.isContentComplete(article.draft),
+    draftVersion: article.draftVersion,
     updatedAt: article.updatedAt
   };
 }

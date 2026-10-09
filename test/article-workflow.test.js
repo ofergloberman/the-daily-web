@@ -28,14 +28,18 @@ function matchesArticle(doc, filter) {
 }
 
 function applyUpdate(doc, update) {
-  if (!update.$set) return;
-  for (const [path, value] of Object.entries(update.$set)) {
-    if (path.includes('.')) {
-      const [root, sub] = path.split('.');
-      doc[root] = { ...doc[root], [sub]: value };
-    } else {
-      doc[path] = value;
+  if (update.$set) {
+    for (const [path, value] of Object.entries(update.$set)) {
+      if (path.includes('.')) {
+        const [root, sub] = path.split('.');
+        doc[root] = { ...doc[root], [sub]: value };
+      } else {
+        doc[path] = value;
+      }
     }
+  }
+  if (update.$inc) {
+    for (const [path, amount] of Object.entries(update.$inc)) doc[path] = (doc[path] || 0) + amount;
   }
 }
 
@@ -48,6 +52,7 @@ function installMocks(t, db, calls = []) {
     const doc = {
       _id: newId(), author: data.author,
       draft: { title: '', summary: '', body: '', category: '', imageUrl: '', ...(data.draft || {}) },
+      draftVersion: 0,
       published: null, status: data.status, editorNote: '',
       publishedAt: null, lastPublishedAt: null, currentPublication: null, totalViews: 0
     };
@@ -183,15 +188,45 @@ test('saveDraftContent ignores unknown fields, enforces ownership, and locks whi
   const stranger = { id: newId(), role: ROLES.REPORTER };
   const created = await workflow.createDraft(owner);
 
-  const updated = await workflow.saveDraftContent(created._id, owner, { title: 'New title', status: 'published', author: 'hacker' });
+  const updated = await workflow.saveDraftContent(created._id, owner, { title: 'New title', status: 'published', author: 'hacker', baseVersion: 0 });
   assert.equal(updated.draft.title, 'New title');
   assert.equal(updated.status, ARTICLE_STATUSES.DRAFT);
+  assert.equal(updated.draftVersion, 1);
 
-  await assert.rejects(workflow.saveDraftContent(created._id, stranger, { title: 'x' }), { code: 'NOT_FOUND' });
-  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 5 }), { code: 'INVALID_CONTENT' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'x' }), { code: 'INVALID_CONTENT' });
+  await assert.rejects(workflow.saveDraftContent(created._id, stranger, { title: 'x', baseVersion: 1 }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 5, baseVersion: 1 }), { code: 'INVALID_CONTENT' });
 
   db.articles.find(a => a._id === created._id).status = ARTICLE_STATUSES.PENDING;
-  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'blocked' }), { code: 'DRAFT_LOCKED' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'blocked', baseVersion: 1 }), { code: 'DRAFT_LOCKED' });
+});
+
+test('saveDraftContent rejects a stale baseVersion so out-of-order writes cannot overwrite newer ones', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter);
+
+  const afterFirst = await workflow.saveDraftContent(created._id, reporter, { title: 'first', baseVersion: 0 });
+  assert.equal(afterFirst.draftVersion, 1);
+
+  // A second, slower request still carrying the original baseVersion (e.g. a
+  // retried/delayed request from another tab) must be rejected, not silently
+  // overwrite the newer save.
+  let error;
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'stale, delayed write', baseVersion: 0 }).catch(e => { error = e; throw e; }),
+    { code: 'STALE_DRAFT' }
+  );
+  assert.equal(error.latest.draftVersion, 1);
+  const current = await workflow.getOwnArticle(created._id, reporter);
+  assert.equal(current.draft.title, 'first');
+  assert.equal(current.draftVersion, 1);
+
+  // Retrying with the version the conflict reported succeeds and advances again.
+  const afterRetry = await workflow.saveDraftContent(created._id, reporter, { title: 'second', baseVersion: error.latest.draftVersion });
+  assert.equal(afterRetry.draft.title, 'second');
+  assert.equal(afterRetry.draftVersion, 2);
 });
 
 test('submitForApproval requires complete content and a valid transition', async t => {
@@ -201,7 +236,7 @@ test('submitForApproval requires complete content and a valid transition', async
   const created = await workflow.createDraft(reporter, { title: 'T' });
 
   await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INCOMPLETE_CONTENT' });
-  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World' });
+  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World', baseVersion: 0 });
 
   const submitted = await workflow.submitForApproval(created._id, reporter);
   assert.equal(submitted.status, ARTICLE_STATUSES.PENDING);
@@ -268,7 +303,7 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_TRANSITION' });
   assert.equal(db.events.length, 1);
 
-  await workflow.saveDraftContent(created._id, reporter, { title: 'V2' });
+  await workflow.saveDraftContent(created._id, reporter, { title: 'V2', baseVersion: 0 });
   await workflow.submitForApproval(created._id, reporter);
   const updatedArticle = await workflow.approve(created._id, editor);
   assert.equal(updatedArticle.published.title, 'V2');
