@@ -1,17 +1,17 @@
 # The Daily Web
 
-This repository contains an Express and Mongoose MVC foundation, login sessions, and a Reporter draft workspace. Reporters can sign in, create and edit their own drafts, and save changes to MongoDB while writing. Editorial review and public article pages are still in development.
+This repository contains an Express and Mongoose MVC foundation, login sessions, a Reporter draft workspace, public article pages, and a comments API with an atomic guest rate limit. Reporters can sign in, create and edit their own drafts, and save changes to MongoDB while writing. Editorial review remains in development.
 
 ## Installation and startup
 
-Node.js 22 or later and either a running local MongoDB database or a MongoDB Atlas connection are required.
+Node.js 22 or later and a transaction-capable MongoDB replica set or compatible MongoDB Atlas deployment are required for the comments API and atomic guest limiter. A standalone MongoDB server is insufficient. See [Comments API setup and testing](README.comments-api.md) for the local replica-set setup and transaction verification command.
 
 ```powershell
 npm install
 Copy-Item .env.example .env
 ```
 
-Set `MONGODB_URI` in `.env` to your database connection string. The example file uses `mongodb://127.0.0.1:27017/the_daily_web`. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
+Set `MONGODB_URI` in `.env` to your transaction-capable database connection string. The example file uses a local replica set on port 27018. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
 
 ```powershell
 npm run dev
@@ -19,7 +19,7 @@ npm run dev
 npm start
 ```
 
-After the database connection succeeds, the server listens on `http://localhost:3000`. A different `PORT` can be configured in `.env`. If the initial database connection fails, the process exits with an error instead of appearing healthy. `GET /health` returns HTTP 200 when the database is connected and HTTP 503 when it is unavailable.
+After the database connection and transaction check succeed, the server listens on `http://localhost:3000`. A different `PORT` can be configured in `.env`. If the initial database connection or transaction check fails, the process exits with an error instead of appearing healthy. `GET /health` returns HTTP 200 when the database is connected and HTTP 503 when it is unavailable.
 
 ### Create the first account
 
@@ -44,6 +44,7 @@ models/User.js                     User schema
 models/Session.js                  Persistent, expiring login sessions
 models/Article.js                  Article schema
 models/Comment.js                  Comment schema
+models/GuestCommentLimit.js        Guest successful-comment timestamps per device
 models/ViewStatistic.js            View counts per article, minute, and publication
 models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
@@ -53,8 +54,14 @@ routes/analytics.js                 Editor-only analytics page and data routes
 middleware/auth.js                 Cookie session loading and role checks
 controllers/authController.js      Login, logout, and account flow
 controllers/reporterController.js  Reporter draft creation, listing, and autosave
+<<<<<<< HEAD
 controllers/editorController.js    Editor article list, status filter, and published-versus-draft review
 controllers/analyticsController.js Analytics article search and view-series responses
+=======
+controllers/commentsController.js  Comment request validation and responses
+services/comments.js               Comment creation and transaction-backed guest limit
+config/transactions.js             MongoDB transaction capability check
+>>>>>>> origin/dev
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
 models/analyticsOperations.js      Atomic view recording, view series queries, publication events, cleanup
 models/editorArticleQueries.js     Article reads used only by Editor routes
@@ -72,9 +79,11 @@ public/editor.css                  Editor desk and review styles
 public/analytics.js                Article search and Canvas views graph
 public/analytics.css               Analytics page styles
 scripts/createUser.js              Local account creation
+scripts/verifyTransactions.js      Verify real transaction write and commit
 public/                            CSS, client-side JavaScript, and image files
 test/foundation.test.js            Foundation tests that do not require a running database
 test/auth.test.js                  Password and session flow tests with a simulated database
+test/comments.integration.test.js  Real MongoDB comment and concurrency tests
 test/reporter.test.js              Reporter draft route and authorization tests
 ```
 
@@ -88,6 +97,7 @@ Mongoose creates `_id`, `createdAt`, and `updatedAt` for every model. The follow
 | Session | A SHA-256 hash of a random cookie token, a User reference, and an expiry time; MongoDB removes expired sessions with a TTL index |
 | Article | `author` references User; `draft` contains work in progress; `published` contains the approved snapshot or null; `status`; `editorNote`; `publishedAt` records the first publication; `lastPublishedAt` records the most recent approval |
 | Comment | `article` references Article; `author` optionally references User and is null for a guest; `displayName` is required; `body` is required and limited to 2,000 characters |
+| GuestCommentLimit | Hashed device identity, up to three recent successful comment timestamps, and expiry time |
 | ViewStatistic | Required `article` and `publication` references; `minute` is a UTC minute boundary; `count` is a nonnegative safe integer, defaulting to zero |
 | PublicationEvent | Required `article` and `editor` references; required `publishedAt` event time; `kind` is `initial` or `update` |
 
@@ -107,7 +117,7 @@ Mongoose does not verify that referenced documents exist. Future controllers are
 - Valid cookies are reused without renewal. Login, session rotation, and logout preserve the device identity; `wd_session` remains separate.
 - Clearing cookies resets viewed-history identity and the guest comment-limit identity. A browser profile is the identity boundary, not a physical device or account. This cookie is not an authentication or authorization credential.
 
-D3 owns viewed/not-viewed storage and filtering using `req.deviceId`. The guest comment limiter should use the same identity for its server-side limit of three comments per minute. This change provides the shared identity only; it does not implement either consumer. Cookie-based tracking cannot preserve identity when users clear or replace their cookies.
+D3 owns viewed/not-viewed storage and filtering using `req.deviceId`. The guest comment limiter hashes this identity before storing its successful timestamps. Cookie-based tracking cannot preserve identity when users clear or replace their cookies.
 
 Validation: `node --test test/device-identity.test.js test/auth.test.js` covers creation, reuse, malformed input, cookie attributes, route mounting, and login/logout continuity. `npm test` runs the full regression suite.
 
@@ -136,7 +146,7 @@ Future view recording must use an atomic `$inc` with an upsert, rather than read
 | `reporter` | Create articles, edit owned articles, and submit them for approval |
 | `editor` | Manage all articles, approve publication, and return articles for corrections |
 
-An anonymous guest does not require a User document in the database. Passwords are hashed with Node's built-in scrypt and a random salt. The browser receives an HttpOnly, SameSite=Lax cookie containing a random session token; MongoDB stores only its hash. Sessions expire after seven days, and logout deletes the saved session. Role checks use the User loaded from MongoDB, never a browser-provided role. Article and comment authorization will be added when those routes are implemented.
+An anonymous guest does not require a User document in the database. Passwords are hashed with Node's built-in scrypt and a random salt. The browser receives an HttpOnly, SameSite=Lax cookie containing a random session token; MongoDB stores only its hash. Sessions expire after seven days, and logout deletes the saved session. Role checks use the User loaded from MongoDB, never a browser-provided role. Comment update and delete require the Editor role on the server.
 
 ## Route contract
 
@@ -152,7 +162,7 @@ An anonymous guest does not require a User document in the database. Passwords a
 | `/articles` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 | `/comments` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 
-Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. Reporter routes require the Reporter role; draft reads and updates require ownership, and updates require Draft status. The article and comment endpoints still return HTTP 501 with `NOT_IMPLEMENTED`. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400. See [README.reporter-draft-foundation.md](README.reporter-draft-foundation.md) for the draft workflow.
+Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. Reporter routes require the Reporter role; draft reads and updates require ownership, and updates require Draft status. Article write endpoints remain placeholders. `GET /comments?articleId=...` returns up to 20 comments by default, with a maximum `limit` of 50 and a `nextCursor` for the following page. `POST /comments` returns HTTP 201 with `{ comment }`; guests can post three successful comments per rolling minute per device across articles. The fourth returns HTTP 429 with `Retry-After`. Read routes only expose comments on articles with an approved `published` snapshot; PATCH and DELETE require an Editor. See [README.comments-api.md](README.comments-api.md) for setup and manual tests. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400.
 
 ## Tests
 
@@ -160,7 +170,7 @@ Login accepts a form or JSON body with `username` and `password`. JSON login res
 npm test
 ```
 
-The tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. They do not test a real database connection, database index enforcement, or concurrent view recording. To test the complete startup path, run `npm start` with MongoDB available, create a Reporter and Editor, and confirm each can log in, survives a server restart, and loses access after logout.
+The standard tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. The comments integration test uses real MongoDB and runs when `COMMENTS_TEST_MONGODB_URI` names a fresh database starting with `the_daily_web_comments_test_`. It verifies validation, visibility, spoofing, authentication, pagination, Editor permissions, exact minute boundaries, rollback after a failed save, cross-article limits, and concurrent submissions. The test drops that temporary database after completion. See [README.comments-api.md](README.comments-api.md) for manual checks.
 
 ## Git and teamwork
 
@@ -168,4 +178,8 @@ The local project has not yet been connected to the team's existing GitHub repos
 
 ## Remaining work
 
+<<<<<<< HEAD
 The remaining project requirements include article submission and editorial approval (including the Editor's approve, return, edit and delete actions), published update versioning, comments, comment rate limiting, the public news feed, weather integration, and the 500-article demo dataset. View statistics, publication history, the Editor article list and review comparison, and the analytics graph are in place.
+=======
+The remaining project requirements include view collection and analytics graphs, article submission and editorial approval, published update versioning, the AJAX comment form, full news-feed interactions, and weather integration. View statistics and publication history schemas are ready for those future implementations.
+>>>>>>> origin/dev
