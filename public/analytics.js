@@ -2,12 +2,14 @@
   const root = document.getElementById('analytics');
   if (!root) return;
 
-  const HOUR_MS = 60 * 60 * 1000;
+  const MINUTE_MS = 60 * 1000;
+  const HOUR_MS = 60 * MINUTE_MS;
   const SEARCH_DELAY_MS = 250;
   const X_TICKS = 5;
   const Y_TICKS = 4;
   const X_TICK_ALIGN = { 0: 'left', [X_TICKS]: 'right' };
-  const MARGIN = { top: 28, right: 20, bottom: 36, left: 52 };
+  const MARGIN = { top: 28, right: 20, bottom: 36, left: 64 };
+  const Y_TITLE_X = 12;
   const COLORS = { line: '#155e96', fill: 'rgba(21, 94, 150, 0.12)', grid: '#d8e1e8', text: '#53677a', initial: '#2d6044', update: '#c2570c' };
   const KIND_LABELS = { initial: 'First publication', update: 'Approved update' };
   const timeZone = root.dataset.timeZone;
@@ -84,6 +86,12 @@
       context.stroke();
       context.fillText(String(views), plot.left - 8, y);
     }
+    context.save();
+    context.translate(Y_TITLE_X, plot.top + plot.height / 2);
+    context.rotate(-Math.PI / 2);
+    context.textAlign = 'center';
+    context.fillText(`Views per ${series.unit}`, 0, 0);
+    context.restore();
     context.textBaseline = 'top';
     for (let tick = 0; tick <= X_TICKS; tick += 1) {
       const time = scale.fromMs + (tick / X_TICKS) * (scale.toMs - scale.fromMs);
@@ -163,22 +171,44 @@
     cell.textContent = text;
   }
 
+  function formatDuration(ms) {
+    const totalMinutes = Math.round(ms / MINUTE_MS);
+    const days = Math.floor(totalMinutes / (24 * 60));
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    if (days) return `${days} d ${hours} h`;
+    if (hours) return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+    return `${minutes} min`;
+  }
+
+  function formatChange(rate, previousRate) {
+    if (rate === null || !previousRate) return '\u2014';
+    const percent = Math.round(((rate - previousRate) / previousRate) * 100);
+    return `${percent > 0 ? '+' : ''}${percent}%`;
+  }
+
   // Compares versions by views per hour, counting only the part of each version's live period inside the range.
   function renderVersions(series) {
     const fromMs = Date.parse(series.from);
     const toMs = Date.parse(series.to);
+    const lastIndex = series.publications.length - 1;
+    let previousRate = null;
     versionsBody.replaceChildren();
     series.publications.forEach((publication, index) => {
       const next = series.publications[index + 1];
       const liveStart = Math.max(Date.parse(publication.publishedAt), fromMs);
       const liveEnd = Math.min(next ? Date.parse(next.publishedAt) : toMs, toMs);
-      const liveHours = (liveEnd - liveStart) / HOUR_MS;
+      const liveMs = Math.max(0, liveEnd - liveStart);
+      const rate = liveMs > 0 ? publication.views / (liveMs / HOUR_MS) : null;
       const row = versionsBody.insertRow();
       tableCell(row, String(index + 1));
-      tableCell(row, KIND_LABELS[publication.kind]);
+      tableCell(row, KIND_LABELS[publication.kind] + (index === lastIndex ? ' (live now)' : ''));
       tableCell(row, formatPublished(publication.publishedAt));
+      tableCell(row, liveMs > 0 ? formatDuration(liveMs) : 'Not live in this range');
       tableCell(row, publication.views.toLocaleString('en-US'));
-      tableCell(row, liveHours > 0 ? (publication.views / liveHours).toFixed(1) : '\u2014');
+      tableCell(row, rate === null ? '\u2014' : rate.toFixed(1));
+      tableCell(row, formatChange(rate, previousRate));
+      previousRate = rate;
     });
   }
 
@@ -188,7 +218,7 @@
     chartTitle.textContent = series.article.title || 'Untitled article';
     canvas.setAttribute('aria-label', `Views per ${series.unit} for ${chartTitle.textContent}: ${total} views in the selected range.`);
     const dayNote = series.unit === 'day' ? ' Days are UTC.' : '';
-    chartStatus.textContent = total ? `${total.toLocaleString('en-US')} views, shown per ${series.unit}.${dayNote}` : 'No views were recorded in this period.';
+    chartStatus.textContent = total ? `${total.toLocaleString('en-US')} views in this period. Each point on the graph is the number of views in one ${series.unit}.${dayNote}` : 'No views were recorded in this period.';
     drawChart(series);
     renderVersions(series);
   }

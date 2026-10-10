@@ -31,7 +31,7 @@
       <% } %>
 
       <% fields.forEach(field => { %>
-        <section class="compare-field<%= field.current === null ? ' compare-field-single' : '' %>" aria-labelledby="field-<%= field.key %>">
+        <section class="compare-field" aria-labelledby="field-<%= field.key %>">
           <h2 id="field-<%= field.key %>" class="compare-title">
             <%= field.label %>
             <% if (field.changed) { %><span class="changed-badge">Changed</span><% } %>

@@ -26,9 +26,8 @@
 .compare-field { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .compare-title { display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem; font-size: 1.1rem; }
 .changed-badge { padding: .1rem .5rem; border-radius: 2rem; background: #fff3d6; color: #7a5200; font: 700 .75rem/1.4 'Trebuchet MS', sans-serif; letter-spacing: 0; }
-.compare-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
-.compare-field-single .compare-columns { grid-template-columns: minmax(0, 1fr); }
-.compare-column { padding: 1rem; border: 1px solid var(--line); background: var(--white); }
+.compare-columns { display: flex; gap: 1.25rem; }
+.compare-column { flex: 1 1 0; min-width: 0; padding: 1rem; border: 1px solid var(--line); background: var(--white); }
 .compare-column-published { border-left: 4px solid var(--success); }
 .compare-label { margin: 0; color: var(--muted); font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .compare-empty { margin: .3rem 0 0; color: var(--muted); font-style: italic; }
@@ -37,5 +36,5 @@
 @media (max-width: 600px) {
   .editor-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
   .editor-row-status { align-items: flex-start; }
-  .compare-columns { grid-template-columns: minmax(0, 1fr); }
+  .compare-columns { flex-direction: column; }
 }

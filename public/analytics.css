@@ -18,6 +18,7 @@
 .legend-update { border-color: #c2570c; }
 
 .table-scroll { overflow-x: auto; }
+.table-note { margin: 0 0 .75rem; color: var(--muted); font-size: .85rem; }
 .versions-table { width: 100%; border-collapse: collapse; background: var(--white); font-size: .9rem; }
 .versions-table th, .versions-table td { padding: .6rem .75rem; border: 1px solid var(--line); text-align: left; }
 .versions-table th { background: var(--pale); }
