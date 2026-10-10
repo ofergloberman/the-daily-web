@@ -1,0 +1,12 @@
+<section class="sidebar-box" id="weather-slot" aria-labelledby="weather-heading">
+  <h2 id="weather-heading">Weather</h2>
+  <p data-weather-message role="status">Weather is temporarily unavailable.</p>
+  <div data-weather-details hidden>
+    <p data-weather-location></p>
+    <p><strong data-weather-temperature></strong> · <span data-weather-condition></span></p>
+    <p class="weather-meta">Conditions at <time data-weather-time></time></p>
+  </div>
+  <p class="weather-meta">Weather data by <a href="https://open-meteo.com/">Open-Meteo</a>,
+    <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+</section>
+<script src="/weather.js" defer></script>

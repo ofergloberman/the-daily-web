@@ -12,3 +12,4 @@ docs/
 create_reporter.ps1
 .agents/
 design/
+.codex/

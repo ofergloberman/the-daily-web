@@ -152,6 +152,20 @@ The standard tests cover schema validation, password hashing, authentication and
 
 The local project has not yet been connected to the team's existing GitHub repository. The repository is public, and every team member should be added as a collaborator. `.gitignore` is ready to exclude secrets, dependencies, and temporary files. After cloning the existing repository and transferring this foundation into it, each team member should work on a separate branch and merge changes through Pull Requests.
 
+## Weather service and sidebar
+
+The homepage and article sidebar load weather through same-origin `GET /weather` using Vanilla JavaScript. Configure `WEATHER_LOCATION` (display name), `WEATHER_LATITUDE` (-90 to 90), and `WEATHER_LONGITUDE` (-180 to 180) in `.env`, then restart the server. `.env.example` provides Tel Aviv coordinates; missing or invalid configuration shows the unavailable message without contacting the provider.
+
+This academic, non-commercial project uses [Open-Meteo](https://open-meteo.com/) with no API key, signup, or credit card. The widget attributes Open-Meteo and its CC BY 4.0 data license. [Current conditions](https://open-meteo.com/en/docs) use 15-minute model data (interpolated in some regions), rather than live station observations. Freshness is measured from the provider's current-condition timestamp, not its model-run initialization time.
+
+`services/weather.js` shares one cache and one in-flight refresh across visitors in the existing single process. Native server-side `fetch` has a five-second deadline covering headers and body. Requests refresh on demand after five minutes, or sooner if conditions expire; failed refreshes back off for one minute. During a failure, a cached result is returned only while still fresh. There is no background provider polling. Multiple server processes would each have their own cache.
+
+`routes/weather.js` and `controllers/weatherController.js` expose a public, database-independent endpoint before session/device middleware. Both available and unavailable results return HTTP 200 with `Cache-Control: no-store`. Available JSON contains `status`, `location`, `temperatureC`, `weatherCode`, `dataTime`, `fetchedAt`, and `expiresAt`; all times are ISO-8601 UTC strings. Unavailable JSON is `{ "status": "unavailable", "message": "Weather is temporarily unavailable." }`. Query parameters cannot override the configured location.
+
+Expiry is the earlier of provider time plus 15 minutes and fetch time plus 15 minutes. Old, future-dated, or malformed provider responses are rejected. The browser uses `X-Weather-Server-Time` to avoid relying on the device clock, subtracts request duration, and hides expired data even during a pending refresh. It polls at most every five minutes while visible (one minute after failures), clears conditions on backgrounding/navigation, and refreshes on return. The partial is `views/partials/weather.ejs`; behavior lives in `public/weather.js`.
+
+Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-provider, controlled-clock tests covering cache reuse, concurrent visitors, timeouts, malformed responses, outages, retry backoff, freshness boundaries, public routing, and long-open page expiry. These tests do not call Open-Meteo or require MongoDB. `npm test` runs the regression suite.
+
 ## Remaining work
 
-The remaining project requirements include view collection and analytics graphs, article submission and editorial approval, published update versioning, the AJAX comment form, full news-feed interactions, and weather integration. View statistics and publication history schemas are ready for those future implementations.
+The remaining project requirements include view collection and analytics graphs, article submission and editorial approval, published update versioning, the AJAX comment form, and full news-feed interactions. View statistics and publication history schemas are ready for those future implementations.
