@@ -1,4 +1,4 @@
-// Local D3 fixtures: 10 published articles and 1 draft. Runs only against a database whose name ends in _dev3.
+// Local D3 fixtures: 45 published articles (three feed batches) and 1 draft. Runs only against a database whose name ends in _dev3.
 const mongoose = require('mongoose');
 const { randomBytes } = require('node:crypto');
 const { connectDatabase } = require('../config/database');
@@ -7,6 +7,7 @@ const User = require('../models/User');
 const Article = require('../models/Article');
 
 const CATEGORIES = ['World', 'Politics', 'Tech', 'Sport', 'Culture'];
+const TOPICS = ['election', 'budget', 'startup', 'final', 'festival', 'climate', 'transit', 'housing', 'museum'];
 
 async function main() {
   await connectDatabase(process.env.MONGODB_URI);
@@ -19,16 +20,16 @@ async function main() {
   }
   await Article.deleteMany({ author: author._id });
   const now = Date.now();
-  const published = Array.from({ length: 10 }, (_, i) => {
+  const published = Array.from({ length: 45 }, (_, i) => {
     const content = {
-      title: `Fixture story ${i + 1}: ${CATEGORIES[i % CATEGORIES.length]} update`,
+      title: `Fixture story ${i + 1}: ${TOPICS[i % TOPICS.length]} ${CATEGORIES[i % CATEGORIES.length]} update`,
       summary: `Summary for fixture story ${i + 1}.`,
       body: `Opening paragraph of fixture story ${i + 1}.\nSecond paragraph with more detail.\nClosing paragraph.`,
       category: CATEGORIES[i % CATEGORIES.length],
       imageUrl: i % 2 ? '' : `https://picsum.photos/seed/dailyweb${i}/900/600`
     };
     const publishedAt = new Date(now - i * 3600e3);
-    return { author: author._id, draft: content, published: content, status: ARTICLE_STATUSES.PUBLISHED, publishedAt, lastPublishedAt: publishedAt };
+    return { author: author._id, draft: content, published: content, status: ARTICLE_STATUSES.PUBLISHED, publishedAt, lastPublishedAt: publishedAt, totalViews: (i * 37) % 11 };
   });
   const draft = { author: author._id, draft: { title: 'Fixture draft that must stay private', body: 'Draft only.' }, status: ARTICLE_STATUSES.DRAFT };
   const created = await Article.insertMany([...published, draft]);
