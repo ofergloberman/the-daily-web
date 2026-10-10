@@ -7,19 +7,25 @@ const Comment = require('../models/Comment');
 const ViewStatistic = require('../models/ViewStatistic');
 const workflow = require('../models/articleWorkflow');
 const { ARTICLE_STATUSES, ROLES } = require('../config/constants');
+const { draftArticleFixture } = require('./fixtures/articles');
 
 function newId() {
   return new mongoose.Types.ObjectId().toString();
 }
 
 function makeDb() {
-  return { articles: [], events: [] };
+  return { articles: [], events: [], comments: [], viewStatistics: [] };
 }
 
 function matchesArticle(doc, filter) {
   for (const [key, value] of Object.entries(filter)) {
-    if (value && typeof value === 'object' && '$ne' in value) {
+    if (key === '$or') {
+      if (!value.some(sub => matchesArticle(doc, sub))) return false;
+    } else if (value && typeof value === 'object' && '$ne' in value) {
       if (doc[key] === value.$ne) return false;
+    } else if (value && typeof value === 'object' && '$exists' in value) {
+      const present = Object.prototype.hasOwnProperty.call(doc, key) && doc[key] !== undefined;
+      if (present !== value.$exists) return false;
     } else if (doc[key] !== value) {
       return false;
     }
@@ -28,14 +34,18 @@ function matchesArticle(doc, filter) {
 }
 
 function applyUpdate(doc, update) {
-  if (!update.$set) return;
-  for (const [path, value] of Object.entries(update.$set)) {
-    if (path.includes('.')) {
-      const [root, sub] = path.split('.');
-      doc[root] = { ...doc[root], [sub]: value };
-    } else {
-      doc[path] = value;
+  if (update.$set) {
+    for (const [path, value] of Object.entries(update.$set)) {
+      if (path.includes('.')) {
+        const [root, sub] = path.split('.');
+        doc[root] = { ...doc[root], [sub]: value };
+      } else {
+        doc[path] = value;
+      }
     }
+  }
+  if (update.$inc) {
+    for (const [path, amount] of Object.entries(update.$inc)) doc[path] = (doc[path] || 0) + amount;
   }
 }
 
@@ -48,6 +58,7 @@ function installMocks(t, db, calls = []) {
     const doc = {
       _id: newId(), author: data.author,
       draft: { title: '', summary: '', body: '', category: '', imageUrl: '', ...(data.draft || {}) },
+      draftVersion: 0,
       published: null, status: data.status, editorNote: '',
       publishedAt: null, lastPublishedAt: null, currentPublication: null, totalViews: 0
     };
@@ -90,10 +101,26 @@ function installMocks(t, db, calls = []) {
   });
 
   t.mock.method(PublicationEvent, 'deleteMany', filter => ({
-    session: async () => { calls.push('publicationEvents'); db.events = db.events.filter(e => e.article !== filter.article); }
+    session: async () => {
+      calls.push('publicationEvents');
+      if (db.failOn === 'publicationEvents') throw new Error('Simulated transient failure deleting publication events.');
+      db.events = db.events.filter(e => e.article !== filter.article);
+    }
   }));
-  t.mock.method(Comment, 'deleteMany', () => ({ session: async () => { calls.push('comments'); } }));
-  t.mock.method(ViewStatistic, 'deleteMany', () => ({ session: async () => { calls.push('viewStatistics'); } }));
+  t.mock.method(Comment, 'deleteMany', filter => ({
+    session: async () => {
+      calls.push('comments');
+      if (db.failOn === 'comments') throw new Error('Simulated transient failure deleting comments.');
+      db.comments = db.comments.filter(c => c.article !== filter.article);
+    }
+  }));
+  t.mock.method(ViewStatistic, 'deleteMany', filter => ({
+    session: async () => {
+      calls.push('viewStatistics');
+      if (db.failOn === 'viewStatistics') throw new Error('Simulated transient failure deleting view statistics.');
+      db.viewStatistics = db.viewStatistics.filter(v => v.article !== filter.article);
+    }
+  }));
 
   // Transactions snapshot/restore the shared store so a throwing callback
   // rolls back every write it made, mirroring session.withTransaction().
@@ -105,6 +132,8 @@ function installMocks(t, db, calls = []) {
       } catch (error) {
         db.articles = before.articles;
         db.events = before.events;
+        db.comments = before.comments;
+        db.viewStatistics = before.viewStatistics;
         throw error;
       }
     },
@@ -119,6 +148,18 @@ test('assertTransition and isContentComplete enforce the status machine', () => 
   assert.equal(workflow.isContentComplete({ title: 'T', summary: 'S', body: 'B', category: 'World' }), true);
   assert.equal(workflow.isContentComplete({ title: 'T', summary: '', body: 'B', category: 'World' }), false);
   assert.equal(workflow.isContentComplete({}), false);
+});
+
+test('isValidImageUrl accepts blank or well-formed http(s) addresses and rejects everything else', () => {
+  assert.equal(workflow.isValidImageUrl(''), true);
+  assert.equal(workflow.isValidImageUrl('   '), true);
+  assert.equal(workflow.isValidImageUrl(undefined), true);
+  assert.equal(workflow.isValidImageUrl('https://example.com/photo.jpg'), true);
+  assert.equal(workflow.isValidImageUrl('http://example.com/photo.jpg'), true);
+  assert.equal(workflow.isValidImageUrl('https://'), false);
+  assert.equal(workflow.isValidImageUrl('unfinished image URL'), false);
+  assert.equal(workflow.isValidImageUrl('javascript:alert(1)'), false);
+  assert.equal(workflow.isValidImageUrl('ftp://example.com/photo.jpg'), false);
 });
 
 test('getPublicProjection exposes only the approved snapshot', () => {
@@ -183,33 +224,106 @@ test('saveDraftContent ignores unknown fields, enforces ownership, and locks whi
   const stranger = { id: newId(), role: ROLES.REPORTER };
   const created = await workflow.createDraft(owner);
 
-  const updated = await workflow.saveDraftContent(created._id, owner, { title: 'New title', status: 'published', author: 'hacker' });
+  const updated = await workflow.saveDraftContent(created._id, owner, { title: 'New title', status: 'published', author: 'hacker', baseVersion: 0 });
   assert.equal(updated.draft.title, 'New title');
   assert.equal(updated.status, ARTICLE_STATUSES.DRAFT);
+  assert.equal(updated.draftVersion, 1);
 
-  await assert.rejects(workflow.saveDraftContent(created._id, stranger, { title: 'x' }), { code: 'NOT_FOUND' });
-  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 5 }), { code: 'INVALID_CONTENT' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'x' }), { code: 'INVALID_CONTENT' });
+  await assert.rejects(workflow.saveDraftContent(created._id, stranger, { title: 'x', baseVersion: 1 }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 5, baseVersion: 1 }), { code: 'INVALID_CONTENT' });
 
   db.articles.find(a => a._id === created._id).status = ARTICLE_STATUSES.PENDING;
-  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'blocked' }), { code: 'DRAFT_LOCKED' });
+  await assert.rejects(workflow.saveDraftContent(created._id, owner, { title: 'blocked', baseVersion: 1 }), { code: 'DRAFT_LOCKED' });
 });
 
-test('submitForApproval requires complete content and a valid transition', async t => {
+test('saveDraftContent rejects a stale baseVersion so out-of-order writes cannot overwrite newer ones', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter);
+
+  const afterFirst = await workflow.saveDraftContent(created._id, reporter, { title: 'first', baseVersion: 0 });
+  assert.equal(afterFirst.draftVersion, 1);
+
+  // A second, slower request still carrying the original baseVersion (e.g. a
+  // retried/delayed request from another tab) must be rejected, not silently
+  // overwrite the newer save.
+  let error;
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'stale, delayed write', baseVersion: 0 }).catch(e => { error = e; throw e; }),
+    { code: 'STALE_DRAFT' }
+  );
+  assert.equal(error.latest.draftVersion, 1);
+  assert.equal(error.latest.draft.title, 'first');
+  const current = await workflow.getOwnArticle(created._id, reporter);
+  assert.equal(current.draft.title, 'first');
+  assert.equal(current.draftVersion, 1);
+
+  // Retrying with the version the conflict reported succeeds and advances again.
+  const afterRetry = await workflow.saveDraftContent(created._id, reporter, { title: 'second', baseVersion: error.latest.draftVersion });
+  assert.equal(afterRetry.draft.title, 'second');
+  assert.equal(afterRetry.draftVersion, 2);
+});
+
+test('saveDraftContent accepts baseVersion 0 for a legacy article that never had draftVersion physically stored', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter);
+
+  // Simulate a document written before the draftVersion field existed: the
+  // real MongoDB row has no such key at all (Mongoose's schema `default: 0`
+  // only applies at hydration time, in memory - it never backfills already
+  // -persisted documents). A bare `{ draftVersion: 0 }` filter would not
+  // match this, since MongoDB only treats a query for `null` as matching
+  // "absent", not a query for the literal number 0.
+  delete db.articles.find(a => a._id === created._id).draftVersion;
+
+  const updated = await workflow.saveDraftContent(created._id, reporter, { title: 'first save on a legacy row', baseVersion: 0 });
+  assert.equal(updated.draft.title, 'first save on a legacy row');
+  assert.equal(updated.draftVersion, 1);
+
+  // Once backfilled, ordinary version matching resumes as normal.
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'stale retry', baseVersion: 0 }),
+    { code: 'STALE_DRAFT' }
+  );
+});
+
+test('submitForApproval requires complete content, a valid image URL, and a valid transition', async t => {
   const db = makeDb();
   installMocks(t, db);
   const reporter = { id: newId(), role: ROLES.REPORTER };
   const created = await workflow.createDraft(reporter, { title: 'T' });
 
-  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INCOMPLETE_CONTENT' });
-  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World' });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 0), { code: 'INCOMPLETE_CONTENT' });
+  await workflow.saveDraftContent(created._id, reporter, { summary: 'S', body: 'B', category: 'World', imageUrl: 'https://', baseVersion: 0 });
 
-  const submitted = await workflow.submitForApproval(created._id, reporter);
+  // A missing/invalid baseVersion is rejected before any content check.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INVALID_CONTENT' });
+
+  // An unfinished/non-http(s) imageUrl blocks submission even though content
+  // is otherwise complete - autosave allows it, submission must not.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 1), { code: 'INVALID_CONTENT' });
+  await workflow.saveDraftContent(created._id, reporter, { imageUrl: 'javascript:alert(1)', baseVersion: 1 });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 2), { code: 'INVALID_CONTENT' });
+
+  await workflow.saveDraftContent(created._id, reporter, { imageUrl: 'https://example.com/photo.jpg', baseVersion: 2 });
+
+  // A stale baseVersion at submission time is rejected as a conflict, same
+  // as saveDraftContent - the completeness/imageUrl checks above only read
+  // the draft once, so without this a concurrent save landing afterward
+  // could get silently approved for submission unseen.
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 2), { code: 'STALE_DRAFT' });
+
+  const submitted = await workflow.submitForApproval(created._id, reporter, 3);
   assert.equal(submitted.status, ARTICLE_STATUSES.PENDING);
-  await assert.rejects(workflow.submitForApproval(created._id, reporter), { code: 'INVALID_TRANSITION' });
-  await assert.rejects(workflow.submitForApproval(created._id, { id: newId(), role: ROLES.REPORTER }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.submitForApproval(created._id, reporter, 3), { code: 'INVALID_TRANSITION' });
+  await assert.rejects(workflow.submitForApproval(created._id, { id: newId(), role: ROLES.REPORTER }, 3), { code: 'NOT_FOUND' });
 });
 
-test('editAsEditor requires the editor role and does not change status', async t => {
+test('editAsEditor requires the editor role, does not change status, and advances draftVersion like saveDraftContent', async t => {
   const db = makeDb();
   installMocks(t, db);
   const reporter = { id: newId(), role: ROLES.REPORTER };
@@ -220,7 +334,22 @@ test('editAsEditor requires the editor role and does not change status', async t
   const edited = await workflow.editAsEditor(created._id, editor, { title: 'Edited by editor' });
   assert.equal(edited.draft.title, 'Edited by editor');
   assert.equal(edited.status, ARTICLE_STATUSES.DRAFT);
+  assert.equal(edited.draftVersion, 1);
   await assert.rejects(workflow.editAsEditor(newId(), editor, { title: 'x' }), { code: 'NOT_FOUND' });
+
+  // A Reporter holding the baseVersion from before the Editor's edit must be
+  // rejected, not silently overwrite the Editor's change - editAsEditor has
+  // to advance the same counter saveDraftContent checks.
+  await assert.rejects(
+    workflow.saveDraftContent(created._id, reporter, { title: 'Reporter overwrite attempt', baseVersion: 0 }),
+    { code: 'STALE_DRAFT' }
+  );
+  const current = await workflow.getOwnArticle(created._id, reporter);
+  assert.equal(current.draft.title, 'Edited by editor');
+
+  const afterReporterSave = await workflow.saveDraftContent(created._id, reporter, { title: 'Reporter retry', baseVersion: 1 });
+  assert.equal(afterReporterSave.draft.title, 'Reporter retry');
+  assert.equal(afterReporterSave.draftVersion, 2);
 });
 
 test('returnForCorrections requires a note and only applies to pending articles', async t => {
@@ -232,7 +361,7 @@ test('returnForCorrections requires a note and only applies to pending articles'
 
   await assert.rejects(workflow.returnForCorrections(created._id, editor, '   '), { code: 'NOTE_REQUIRED' });
   await assert.rejects(workflow.returnForCorrections(created._id, editor, 'Needs work'), { code: 'INVALID_TRANSITION' });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.submitForApproval(created._id, reporter, 0);
 
   const returned = await workflow.returnForCorrections(created._id, editor, 'Needs work');
   assert.equal(returned.status, ARTICLE_STATUSES.RETURNED);
@@ -248,7 +377,7 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   const created = await workflow.createDraft(reporter, { title: 'V1', summary: 'S', body: 'B', category: 'World' });
 
   await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_TRANSITION' });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.submitForApproval(created._id, reporter, 0);
   await assert.rejects(workflow.approve(created._id, reporter), { code: 'FORBIDDEN' });
 
   const published = await workflow.approve(created._id, editor);
@@ -268,13 +397,86 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_TRANSITION' });
   assert.equal(db.events.length, 1);
 
-  await workflow.saveDraftContent(created._id, reporter, { title: 'V2' });
-  await workflow.submitForApproval(created._id, reporter);
+  await workflow.saveDraftContent(created._id, reporter, { title: 'V2', baseVersion: 0 });
+  await workflow.submitForApproval(created._id, reporter, 1);
   const updatedArticle = await workflow.approve(created._id, editor);
   assert.equal(updatedArticle.published.title, 'V2');
   assert.equal(db.events.length, 2);
   assert.equal(db.events[1].kind, 'update');
   assert.equal(new Date(updatedArticle.publishedAt).getTime(), new Date(published.publishedAt).getTime());
+});
+
+test('approve rejects a non-http(s) imageUrl even if it reached pending via editAsEditor after submission', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'T', summary: 'S', body: 'B', category: 'World' });
+  await workflow.submitForApproval(created._id, reporter, 0);
+
+  // editAsEditor bypasses submission's validation entirely (no status
+  // change, direct content edit) - approve() must catch a bad value here too.
+  await workflow.editAsEditor(created._id, editor, { imageUrl: 'javascript:alert(1)' });
+  await assert.rejects(workflow.approve(created._id, editor), { code: 'INVALID_CONTENT' });
+  assert.equal(db.events.length, 0);
+
+  await workflow.editAsEditor(created._id, editor, { imageUrl: '' });
+  const published = await workflow.approve(created._id, editor);
+  assert.equal(published.published.imageUrl, '');
+});
+
+test('a full correction cycle on an already-published article: public content stays on the old snapshot through editing, resubmission, and a return, and only the final approved version replaces it in exactly one new event', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'V1', summary: 'S', body: 'B', category: 'World', imageUrl: '' });
+
+  // First publish cycle: draft/pending -> published.
+  await workflow.submitForApproval(created._id, reporter, 0);
+  const firstPublish = await workflow.approve(created._id, editor);
+  assert.equal(firstPublish.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(firstPublish.published.title, 'V1');
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0].kind, 'initial');
+  const originalPublishedAt = firstPublish.publishedAt;
+
+  // Reporter reopens the published article and starts a new draft cycle.
+  // Editing must only ever touch `draft` - the public snapshot must not move.
+  const edited = await workflow.saveDraftContent(created._id, reporter, { title: 'V2 (revision)', baseVersion: firstPublish.draftVersion });
+  assert.equal(edited.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(edited.published.title, 'V1', 'public snapshot must be untouched by a draft edit');
+
+  // Resubmitting a published article moves it back to pending for review -
+  // public content is still the old, approved version throughout.
+  const resubmitted = await workflow.submitForApproval(created._id, reporter, edited.draftVersion);
+  assert.equal(resubmitted.status, ARTICLE_STATUSES.PENDING);
+  assert.equal(resubmitted.published.title, 'V1');
+
+  // Editor sends it back with a correction note instead of approving.
+  const returned = await workflow.returnForCorrections(created._id, editor, 'Please add a source for this claim.');
+  assert.equal(returned.status, ARTICLE_STATUSES.RETURNED);
+  assert.equal(returned.editorNote, 'Please add a source for this claim.');
+  assert.equal(returned.published.title, 'V1', 'public snapshot must survive a return-for-corrections too');
+
+  // Reporter addresses the note and resubmits again.
+  const corrected = await workflow.saveDraftContent(created._id, reporter, { title: 'V2 (with source)', baseVersion: returned.draftVersion });
+  assert.equal(corrected.published.title, 'V1');
+  const resubmittedAgain = await workflow.submitForApproval(created._id, reporter, corrected.draftVersion);
+  assert.equal(resubmittedAgain.status, ARTICLE_STATUSES.PENDING);
+  assert.equal(resubmittedAgain.published.title, 'V1');
+
+  // Only now, on approval, does the public snapshot change - to exactly the
+  // reviewed draft, via exactly one additional PublicationEvent.
+  const secondPublish = await workflow.approve(created._id, editor);
+  assert.equal(secondPublish.status, ARTICLE_STATUSES.PUBLISHED);
+  assert.equal(secondPublish.published.title, 'V2 (with source)');
+  assert.equal(secondPublish.editorNote, '', 'the correction note is cleared once the revision is approved');
+  assert.equal(db.events.length, 2);
+  assert.equal(db.events[1].kind, 'update');
+  assert.equal(new Date(secondPublish.publishedAt).getTime(), new Date(originalPublishedAt).getTime(), 'publishedAt tracks the first publish, not each update');
+  assert.ok(new Date(secondPublish.lastPublishedAt).getTime() >= new Date(originalPublishedAt).getTime());
+  assert.equal(secondPublish.currentPublication, db.events[1]._id);
 });
 
 test('deleteArticle cascades Comments, PublicationEvents, and ViewStatistics before the Article, and is Editor-only', async t => {
@@ -285,10 +487,82 @@ test('deleteArticle cascades Comments, PublicationEvents, and ViewStatistics bef
   const editor = { id: newId(), role: ROLES.EDITOR };
   const created = await workflow.createDraft(reporter);
 
+  // Associated records a real deployment would have accumulated: a comment,
+  // a publication event, and a view-count bucket. deleteArticle must remove
+  // all of them, not just the Article document itself.
+  db.comments.push({ _id: newId(), article: created._id, body: 'Nice piece.' });
+  db.events.push({ _id: newId(), article: created._id, kind: 'initial' });
+  db.viewStatistics.push({ _id: newId(), article: created._id, minute: new Date(0), count: 3 });
+  // An unrelated article's records must survive untouched - the delete is
+  // scoped to this article's _id only.
+  const otherId = newId();
+  db.comments.push({ _id: newId(), article: otherId, body: 'Unrelated.' });
+
   await assert.rejects(workflow.deleteArticle(created._id, reporter), { code: 'FORBIDDEN' });
   await assert.rejects(workflow.deleteArticle(newId(), editor), { code: 'NOT_FOUND' });
 
   await workflow.deleteArticle(created._id, editor);
   assert.deepEqual(calls, ['comments', 'publicationEvents', 'viewStatistics', 'article']);
   assert.equal(db.articles.some(a => a._id === created._id), false);
+  assert.equal(db.comments.some(c => c.article === created._id), false);
+  assert.equal(db.events.some(e => e.article === created._id), false);
+  assert.equal(db.viewStatistics.some(v => v.article === created._id), false);
+  // The other article's comment was not touched by this cascade.
+  assert.equal(db.comments.some(c => c.article === otherId), true);
+});
+
+test('deleteArticle rolls back the entire cascade if any step fails partway through - no partial deletion', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const created = await workflow.createDraft(reporter, draftArticleFixture().draft);
+  db.comments.push({ _id: newId(), article: created._id, body: 'Nice piece.' });
+  db.events.push({ _id: newId(), article: created._id, kind: 'initial' });
+  db.viewStatistics.push({ _id: newId(), article: created._id, minute: new Date(0), count: 1 });
+
+  // Simulate a transient failure (e.g. a dropped connection) partway through
+  // the cascade, after Comments were removed but before PublicationEvents.
+  // withTransaction must roll back everything, including the already-applied
+  // comment deletion - a real MongoDB transaction guarantees this atomically.
+  db.failOn = 'publicationEvents';
+  await assert.rejects(workflow.deleteArticle(created._id, editor));
+  delete db.failOn;
+
+  assert.equal(db.articles.some(a => a._id === created._id), true, 'article must survive a rolled-back delete');
+  assert.equal(db.comments.some(c => c.article === created._id), true, 'comments must be restored by rollback');
+  assert.equal(db.events.some(e => e.article === created._id), true, 'events must be restored by rollback');
+  assert.equal(db.viewStatistics.some(v => v.article === created._id), true, 'view stats must be restored by rollback');
+
+  // With the transient failure cleared, the same delete now succeeds cleanly.
+  await workflow.deleteArticle(created._id, editor);
+  assert.equal(db.articles.some(a => a._id === created._id), false);
+  assert.equal(db.comments.some(c => c.article === created._id), false);
+});
+
+test('a late/delayed request against an already-deleted article is rejected as NOT_FOUND by every workflow operation, never recreating it', async t => {
+  const db = makeDb();
+  installMocks(t, db);
+  const reporter = { id: newId(), role: ROLES.REPORTER };
+  const editor = { id: newId(), role: ROLES.EDITOR };
+  const created = await workflow.createDraft(reporter, { title: 'T', summary: 'S', body: 'B', category: 'World' });
+  const id = created._id;
+
+  await workflow.deleteArticle(id, editor);
+  assert.equal(db.articles.length, 0);
+
+  // Every mutating/read operation a stale client request could still send
+  // must fail cleanly against the now-missing _id, and none of them may
+  // resurrect any document.
+  await assert.rejects(workflow.getOwnArticle(id, reporter), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.saveDraftContent(id, reporter, { title: 'late write', baseVersion: 0 }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.submitForApproval(id, reporter, 0), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.editAsEditor(id, editor, { title: 'late edit' }), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.returnForCorrections(id, editor, 'late note'), { code: 'NOT_FOUND' });
+  await assert.rejects(workflow.approve(id, editor), { code: 'NOT_FOUND' });
+  // A duplicate/retried delete (e.g. a double-click or a redelivered request)
+  // must not succeed a second time or throw anything other than NOT_FOUND.
+  await assert.rejects(workflow.deleteArticle(id, editor), { code: 'NOT_FOUND' });
+
+  assert.equal(db.articles.length, 0, 'no operation above may have recreated the article');
 });

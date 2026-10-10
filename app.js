@@ -19,6 +19,7 @@ app.get('/health', (_req, res) => {
   const connected = mongoose.connection.readyState === 1;
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
 });
+app.use('/weather', require('./routes/weather'));
 app.use(deviceIdentity);
 app.use(loadUser);
 app.get('/', showHome);

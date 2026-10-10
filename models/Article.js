@@ -13,6 +13,11 @@ const contentSchema = new mongoose.Schema({
 const articleSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   draft: { type: contentSchema, default: () => ({}) },
+  // Bumped by one on every successful saveDraftContent write. The client
+  // echoes back the value it last saw as `baseVersion`; a mismatch means a
+  // newer save already landed (another tab/device, or a delayed/out-of-order
+  // request) and the write is rejected instead of silently clobbering it.
+  draftVersion: { type: Number, default: 0 },
   // Public readers use this approved snapshot, even while draft changes.
   published: { type: contentSchema, default: null },
   status: { type: String, enum: Object.values(ARTICLE_STATUSES), default: ARTICLE_STATUSES.DRAFT, required: true },

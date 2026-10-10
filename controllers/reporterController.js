@@ -1,26 +1,42 @@
-const mongoose = require('mongoose');
-const Article = require('../models/Article');
+const workflow = require('../models/articleWorkflow');
 const { ARTICLE_STATUSES } = require('../config/constants');
 
-const FIELDS = ['title', 'summary', 'body', 'category', 'imageUrl'];
-const LIMITS = { title: 200, summary: 500, body: 50000, category: 80, imageUrl: 2048 };
 const PAGE_SIZE = 20;
+
+function actor(req) {
+  return { id: req.user.id, role: req.user.role };
+}
 
 function pageNumber(value) {
   const page = Number(value || 1);
   return Number.isSafeInteger(page) && page > 0 && page <= 10000 ? page : null;
 }
 
-function validId(req, res) {
-  if (mongoose.isValidObjectId(req.params.id)) return true;
-  res.status(400).json({ error: 'INVALID_ARTICLE_ID' });
-  return false;
+/** Sends the HTTP response for a WorkflowError and returns true, or returns false for any other error. */
+function sendWorkflowError(res, error) {
+  if (!(error instanceof workflow.WorkflowError)) return false;
+  const body = { error: error.code, message: error.message };
+  if (error.latest) body.latest = error.latest;
+  res.status(error.status).json(body);
+  return true;
+}
+
+/** An article is submittable once its required fields are complete AND any imageUrl is a well-formed http(s) address. */
+function canSubmit(article) {
+  return workflow.isContentComplete(article.draft) && workflow.isValidImageUrl(article.draft?.imageUrl);
 }
 
 function publicArticle(article) {
   return {
-    id: String(article._id), status: article.status,
-    draft: Object.fromEntries(FIELDS.map(field => [field, article.draft?.[field] || ''])),
+    id: String(article._id),
+    status: article.status,
+    editorNote: article.editorNote || '',
+    draft: {
+      title: article.draft?.title || '', summary: article.draft?.summary || '', body: article.draft?.body || '',
+      category: article.draft?.category || '', imageUrl: article.draft?.imageUrl || ''
+    },
+    canSubmit: canSubmit(article),
+    draftVersion: article.draftVersion,
     updatedAt: article.updatedAt
   };
 }
@@ -28,74 +44,80 @@ function publicArticle(article) {
 async function dashboard(req, res, next) {
   const page = pageNumber(req.query.page);
   if (!page) return res.status(400).json({ error: 'INVALID_PAGE' });
+  const status = typeof req.query.status === 'string' ? req.query.status : '';
   try {
-    const articles = await Article.find({ author: req.user._id })
+    const articles = await workflow.listOwnArticlesQuery(actor(req), status ? { status } : {})
       .select('draft.title status editorNote updatedAt').sort({ updatedAt: -1, _id: -1 })
       .skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1).lean();
-    res.render('reporterDashboard', { user: req.user, articles: articles.slice(0, PAGE_SIZE), page, hasNext: articles.length > PAGE_SIZE });
-  } catch (error) { next(error); }
+    res.render('reporterDashboard', { user: req.user, articles: articles.slice(0, PAGE_SIZE), page, hasNext: articles.length > PAGE_SIZE, status });
+  } catch (error) {
+    if (sendWorkflowError(res, error)) return;
+    next(error);
+  }
 }
 
 async function listArticles(req, res, next) {
   const page = pageNumber(req.query.page);
   if (!page) return res.status(400).json({ error: 'INVALID_PAGE' });
+  const status = typeof req.query.status === 'string' ? req.query.status : '';
   try {
-    const articles = await Article.find({ author: req.user._id })
+    const articles = await workflow.listOwnArticlesQuery(actor(req), status ? { status } : {})
       .select('draft.title status editorNote updatedAt').sort({ updatedAt: -1, _id: -1 })
       .skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1).lean();
     res.json({ page, hasNext: articles.length > PAGE_SIZE, articles: articles.slice(0, PAGE_SIZE).map(article => ({
       id: String(article._id), title: article.draft?.title || 'Untitled article',
       status: article.status, editorNote: article.editorNote, updatedAt: article.updatedAt
     })) });
-  } catch (error) { next(error); }
-}
-
-async function createArticle(req, res, next) {
-  try {
-    const article = await Article.create({ author: req.user._id, status: ARTICLE_STATUSES.DRAFT });
-    console.info('Reporter created draft:', String(article._id));
-    const location = `/reporter/articles/${article._id}/edit`;
-    if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, location);
-    res.status(201).location(location).json({ article: publicArticle(article), editUrl: location });
-  } catch (error) { next(error); }
-}
-
-async function editArticle(req, res, next) {
-  if (!validId(req, res)) return;
-  try {
-    const article = await Article.findOne({ _id: req.params.id, author: req.user._id, status: ARTICLE_STATUSES.DRAFT });
-    if (!article) return res.status(404).json({ error: 'DRAFT_NOT_FOUND' });
-    res.render('reporterEditor', { user: req.user, article });
-  } catch (error) { next(error); }
-}
-
-function validateDraft(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'Expected a draft object.';
-  const keys = Object.keys(body);
-  if (keys.length !== FIELDS.length || keys.some(key => !FIELDS.includes(key))) return 'Send only title, summary, body, category, and imageUrl.';
-  for (const field of FIELDS) {
-    if (typeof body[field] !== 'string' || body[field].length > LIMITS[field]) return `Invalid ${field}.`;
-  }
-  // Preserve unfinished URLs as draft text; validate http/https before publication.
-  return null;
-}
-
-async function saveDraft(req, res, next) {
-  if (!validId(req, res)) return;
-  const problem = validateDraft(req.body);
-  if (problem) return res.status(400).json({ error: 'INVALID_DRAFT', message: problem });
-  try {
-    const changes = Object.fromEntries(FIELDS.map(field => [`draft.${field}`, req.body[field]]));
-    const article = await Article.findOneAndUpdate(
-      { _id: req.params.id, author: req.user._id, status: ARTICLE_STATUSES.DRAFT },
-      { $set: changes }, { new: true, runValidators: true }
-    );
-    if (!article) return res.status(404).json({ error: 'DRAFT_NOT_FOUND' });
-    res.json({ article: publicArticle(article) });
   } catch (error) {
-    if (error.name === 'ValidationError') return res.status(400).json({ error: 'INVALID_DRAFT' });
+    if (sendWorkflowError(res, error)) return;
     next(error);
   }
 }
 
-module.exports = { dashboard, listArticles, createArticle, editArticle, saveDraft };
+async function createArticle(req, res, next) {
+  try {
+    const article = await workflow.createDraft(actor(req));
+    console.info('Reporter created draft:', String(article._id));
+    const location = `/reporter/articles/${article._id}/edit`;
+    if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, location);
+    res.status(201).location(location).json({ article: publicArticle(article), editUrl: location });
+  } catch (error) {
+    if (sendWorkflowError(res, error)) return;
+    next(error);
+  }
+}
+
+async function editArticle(req, res, next) {
+  try {
+    const article = await workflow.getOwnArticle(req.params.id, actor(req));
+    const locked = article.status === ARTICLE_STATUSES.PENDING;
+    res.render('reporterEditor', { user: req.user, article, locked, canSubmit: !locked && canSubmit(article) });
+  } catch (error) {
+    if (sendWorkflowError(res, error)) return;
+    next(error);
+  }
+}
+
+async function saveDraft(req, res, next) {
+  try {
+    const article = await workflow.saveDraftContent(req.params.id, actor(req), req.body);
+    res.json({ article: publicArticle(article) });
+  } catch (error) {
+    if (sendWorkflowError(res, error)) return;
+    next(error);
+  }
+}
+
+async function submitArticle(req, res, next) {
+  try {
+    const article = await workflow.submitForApproval(req.params.id, actor(req), (req.body || {}).baseVersion);
+    if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, '/reporter');
+    res.json({ article: publicArticle(article) });
+  } catch (error) {
+    if (sendWorkflowError(res, error)) return;
+    next(error);
+  }
+}
+
+module.exports = { dashboard, listArticles, createArticle, editArticle, saveDraft, submitArticle };
+
