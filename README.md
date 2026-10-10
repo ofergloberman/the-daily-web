@@ -32,7 +32,7 @@ try { npm run create-user -- reporter1 'Reporter One' reporter }
 finally { Remove-Item Env:NEW_USER_PASSWORD }
 ```
 
-Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, which is still a protected starter area. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
+Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, where they browse all articles, review submissions, and open `/analytics`. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
 
 ## Project structure
 
@@ -49,20 +49,32 @@ models/ViewStatistic.js            View counts per article, minute, and publicat
 models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
 routes/reporter.js                  Reporter dashboard and draft routes
+routes/editor.js                    Editor desk and article review routes
+routes/analytics.js                 Editor-only analytics page and data routes
 middleware/auth.js                 Cookie session loading and role checks
-controllers/authController.js      Login, logout, account, and Editor starter area flow
+controllers/authController.js      Login, logout, and account flow
 controllers/reporterController.js  Reporter draft creation, listing, and autosave
+controllers/editorController.js    Editor article list, status filter, and published-versus-draft review
+controllers/analyticsController.js Analytics article search and view-series responses
 controllers/commentsController.js  Comment request validation and responses
 services/comments.js               Comment creation and transaction-backed guest limit
 config/transactions.js             MongoDB transaction capability check
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
+models/analyticsOperations.js      Atomic view recording, view series queries, publication events, cleanup
+models/editorArticleQueries.js     Article reads used only by Editor routes
+services/visits.js                 Records a visit against the publication a reader received
+helpers/pagination.js              Page number validation
 views/index.ejs                    Basic server-rendered landing page
 views/login.ejs                    Login form
-views/workArea.ejs                 Protected starter areas
+views/editor/                      Editor desk list and review comparison
+views/analytics/                   Impact analytics page
 views/reporterDashboard.ejs        Reporter article list
 views/reporterEditor.ejs           Draft editor
 public/reporter-autosave.js        Browser-side AJAX autosave
 public/reporter.css                Reporter workspace styles
+public/editor.css                  Editor desk and review styles
+public/analytics.js                Article search and Canvas views graph
+public/analytics.css               Analytics page styles
 scripts/createUser.js              Local account creation
 scripts/verifyTransactions.js      Verify real transaction write and commit
 public/                            CSS, client-side JavaScript, and image files
@@ -108,13 +120,20 @@ Validation: `node --test test/device-identity.test.js test/auth.test.js` covers 
 
 ## Analytics storage contract
 
-These schemas provide the Stage 0 storage foundation for requirements 12 and 14. Collection and approval controllers, analytics endpoints, and graphs remain future work.
+These schemas provide the storage foundation for requirements 12 and 14. `models/analyticsOperations.js` implements the operations on them; the approval workflow that creates publication events is still future work.
 
 Store a separate PublicationEvent for the initial publication and every approved update. Its `publishedAt` must be the server-recorded publication time, not the time a draft was edited. The article/time index supports fetching all graph markers without growing an array inside Article. Article's `publishedAt` and `lastPublishedAt` remain convenient first/latest timestamps; they do not replace the event history. Events store publication metadata, not archived article content.
 
 Store view counts in one-minute buckets rather than one document per visit. Compute `minute` from the server visit time with `new Date(Math.floor(visitTime.getTime() / 60000) * 60000)`. Each bucket references the publication that the reader actually received, so updates within a minute have separate counts. The unique index on article, minute, and publication prevents duplicate buckets and supports article/time-range queries. Summing their counts gives views over time.
 
 Future view recording must use an atomic `$inc` with an upsert, rather than reading and saving a counter, and handle duplicate-key races when concurrently creating a bucket. Future approval logic must keep the public snapshot, article timestamps, and publication event consistent and avoid duplicate events on retries. Controllers must validate referenced records, verify that the publication belongs to the article, enforce Editor authorization for publication, and clean up associated statistics/events when deleting an article. Schema validation does not enforce these rules or automatically record visits. Anonymous viewed/not-viewed tracking is a separate future concern; these aggregate counts contain no device identifiers.
+
+### Analytics operations (D4)
+
+- `recordVisit(articleId, publicationId, visitTime)` increments the minute bucket with one atomic `$inc` upsert and retries once if a concurrent first visit wins the unique-index race. `services/visits.js` calls it from the public article page, attributing the view to the article's newest publication event; articles without an event are not counted.
+- `createPublicationEvent({ article, editor, kind, publishedAt }, session)` is the only function the approval workflow should use to record a publication. Pass the transaction `session` so the event commits with the new public snapshot.
+- `deleteArticleAnalytics(articleId, session)` removes an article's buckets and events; the article deletion workflow must call it.
+- `getViewSeries(articleId, from, to)` returns views per bucket and every publication with its views in the range. Ranges are at most 366 days. The bucket is a minute up to 6 hours, an hour up to 31 days, and a day (UTC) beyond that, so a graph never exceeds about 750 points. Empty buckets are returned as zero.
 
 ## Agreed roles
 
@@ -131,7 +150,9 @@ An anonymous guest does not require a User document in the database. Passwords a
 | Route | Reserved operations |
 | --- | --- |
 | `/auth` | `GET /` login page, `POST /login`, `POST /logout`, `GET /me` |
-| `/reporter`, `/editor` | Reporter workspace and protected Editor starter area |
+| `/reporter`, `/editor` | Reporter workspace and Editor desk |
+| `/editor` | `GET /?status=&page=` all articles with optional status filter, `GET /articles/:id` review page comparing the published snapshot with the working draft |
+| `/analytics` | Editor only: `GET /` page, `GET /articles?q=` search published titles, `GET /articles/:id/views?from=&to=` views per time bucket and publication markers |
 | `/reporter/articles` | `GET` paginated own articles, `POST` create a private draft |
 | `/reporter/articles/:id/edit` | `GET` edit an owned draft |
 | `/reporter/articles/:id/draft` | `PATCH` save the five working content fields |
@@ -168,4 +189,4 @@ Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-pr
 
 ## Remaining work
 
-The remaining project requirements include view collection and analytics graphs, article submission and editorial approval, published update versioning, the AJAX comment form, and full news-feed interactions. View statistics and publication history schemas are ready for those future implementations.
+The remaining project requirements include the Editor's approve, return, edit and delete actions, full news-feed interactions, and the 500-article demo dataset. View statistics, publication history, the Editor article list and review comparison, and the analytics graph are in place.

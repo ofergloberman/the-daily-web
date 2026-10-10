@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
 const { deviceIdentity } = require('./middleware/deviceIdentity');
-const { editorArea } = require('./controllers/authController');
 const { showHome } = require('./controllers/publicArticleController');
 const { formatDate } = require('./helpers/dates');
 
@@ -26,7 +25,8 @@ app.use(loadUser);
 app.get('/', showHome);
 app.use('/auth', require('./routes/auth'));
 app.use('/reporter', requireReporter, require('./routes/reporter'));
-app.get('/editor', requireEditor, editorArea);
+app.use('/editor', requireEditor, require('./routes/editor'));
+app.use('/analytics', requireEditor, require('./routes/analytics'));
 app.use('/articles', require('./routes/articles'));
 app.use('/comments', require('./routes/comments'));
 app.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND' }));

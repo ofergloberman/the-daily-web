@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head') %>
+</head>
+<body>
+  <%- include('../partials/header') %>
+  <div class="page-shell">
+    <main class="page-main">
+      <p class="section-label">Editor desk</p>
+      <div class="editor-heading">
+        <h1>All articles</h1>
+        <a href="/analytics">Impact analytics</a>
+      </div>
+      <nav class="status-filter" aria-label="Filter by status">
+        <a href="/editor"<% if (!status) { %> aria-current="page"<% } %>>All</a>
+        <% Object.entries(statusLabels).forEach(([value, label]) => { %>
+          <a href="/editor?status=<%= value %>"<% if (status === value) { %> aria-current="page"<% } %>><%= label %></a>
+        <% }) %>
+      </nav>
+      <% const statusQuery = status ? `status=${status}&` : ''; %>
+      <% if (!articles.length) { %>
+        <section class="empty-state">
+          <h2>No articles found</h2>
+          <p><%= page === 1 ? 'There are no articles with this status yet.' : 'There are no more articles.' %></p>
+          <% if (page > 1) { %><a href="/editor?<%= statusQuery %>page=<%= page - 1 %>">Previous page</a><% } %>
+        </section>
+      <% } else { %>
+        <section class="article-list" aria-label="Articles">
+          <% articles.forEach(article => { %>
+            <article class="editor-row">
+              <div class="editor-row-main">
+                <h2 class="editor-row-title"><a href="/editor/articles/<%= article._id %>"><%= article.draft?.title || article.published?.title || 'Untitled article' %></a></h2>
+                <p class="card-meta">By <%= article.author?.displayName || 'Unknown reporter' %> &middot; Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= formatDate(article.updatedAt) %></time></p>
+              </div>
+              <div class="editor-row-status">
+                <span class="status-badge status-<%= article.status %>"><%= statusLabels[article.status] %></span>
+                <% if (article.published && article.status !== 'published') { %><span class="status-note">Update to a published article</span><% } %>
+              </div>
+            </article>
+          <% }) %>
+        </section>
+        <nav class="page-nav" aria-label="Article pages">
+          <% if (page > 1) { %><a href="/editor?<%= statusQuery %>page=<%= page - 1 %>">Previous page</a><% } %>
+          <span>Page <%= page %></span>
+          <% if (hasNext) { %><a href="/editor?<%= statusQuery %>page=<%= page + 1 %>">Next page</a><% } %>
+        </nav>
+      <% } %>
+    </main>
+  </div>
+  <%- include('../partials/footer') %>
+</body>
+</html>

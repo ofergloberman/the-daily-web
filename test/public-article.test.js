@@ -33,6 +33,7 @@ test('public article page renders only the published snapshot', async t => {
     };
   });
 
+  t.mock.method(visits, 'recordVisit', async () => {});
   t.mock.method(Article, 'findOne', query => {
     let selected;
     return {

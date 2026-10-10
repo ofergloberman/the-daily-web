@@ -1,0 +1,29 @@
+/* Impact analytics page. Tokens and layout come from base.css. */
+.analytics-picker { margin: 1.5rem 0 2rem; }
+.analytics-picker .field { width: 100%; max-width: 32rem; }
+.result-list { list-style: none; margin: .75rem 0 0; padding: 0; max-width: 32rem; border: 1px solid var(--line); background: var(--white); }
+.result-list:empty { display: none; }
+.result-list li + li { border-top: 1px solid var(--line); }
+.result-button { display: block; width: 100%; padding: .65rem .8rem; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.result-button:hover { background: var(--pale); }
+.result-button[aria-current="true"] { background: var(--pale); font-weight: 700; }
+
+.analytics-panel[hidden] { display: none; }
+.panel-heading { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+.panel-heading h2 { margin: 0; font-size: 1.5rem; }
+#views-chart { display: block; width: 100%; height: 22rem; border: 1px solid var(--line); background: var(--white); }
+.chart-legend { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1.25rem; margin: .75rem 0 1.5rem; color: var(--muted); font-size: .85rem; }
+.legend-line { display: inline-block; width: 1.5rem; height: 0; margin-right: .4rem; border-top: 3px dashed; vertical-align: middle; }
+.legend-initial { border-color: #2d6044; }
+.legend-update { border-color: #c2570c; }
+
+.table-scroll { overflow-x: auto; }
+.table-note { margin: 0 0 .75rem; color: var(--muted); font-size: .85rem; }
+.versions-table { width: 100%; border-collapse: collapse; background: var(--white); font-size: .9rem; }
+.versions-table th, .versions-table td { padding: .6rem .75rem; border: 1px solid var(--line); text-align: left; }
+.versions-table th { background: var(--pale); }
+.versions-table td:nth-child(n+4) { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) {
+  #views-chart { height: 16rem; }
+}

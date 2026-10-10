@@ -48,7 +48,7 @@ test('login, role checks, restart continuity, and logout', async t => {
   }));
   t.mock.method(Session, 'deleteOne', async ({ tokenHash }) => { sessions.delete(tokenHash); });
   t.mock.method(Article, 'find', () => ({
-    select() { return this; }, sort() { return this; }, skip() { return this; }, limit() { return this; },
+    select() { return this; }, sort() { return this; }, skip() { return this; }, limit() { return this; }, populate() { return this; },
     async lean() { return []; }
   }));
 

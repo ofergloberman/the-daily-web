@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head') %>
+</head>
+<body>
+  <%- include('../partials/header') %>
+  <div class="page-shell">
+    <main class="page-main" id="analytics" data-article-id="<%= articleId %>" data-time-zone="<%= timeZone %>">
+      <p><a href="/editor">&larr; All articles</a></p>
+      <p class="section-label">Impact analytics</p>
+      <h1>Article views over time</h1>
+
+      <section class="analytics-picker" aria-labelledby="picker-title">
+        <h2 id="picker-title">Choose an article</h2>
+        <label class="field-label" for="article-search">Search published titles</label>
+        <input class="field" id="article-search" type="search" maxlength="100" autocomplete="off" placeholder="Leave empty to see the newest articles">
+        <p class="loading" id="search-status" role="status"></p>
+        <ul class="result-list" id="article-results"></ul>
+      </section>
+
+      <section class="analytics-panel" id="analytics-panel" aria-labelledby="chart-title" hidden>
+        <div class="panel-heading">
+          <h2 id="chart-title"></h2>
+          <div>
+            <label class="field-label" for="range">Time range</label>
+            <select class="field" id="range">
+              <option value="1">Last hour</option>
+              <option value="6">Last 6 hours</option>
+              <option value="24">Last 24 hours</option>
+              <option value="168" selected>Last 7 days</option>
+              <option value="720">Last 30 days</option>
+              <option value="2160">Last 90 days</option>
+              <option value="8760">Last 365 days</option>
+            </select>
+          </div>
+        </div>
+        <p class="loading" id="chart-status" role="status"></p>
+        <canvas id="views-chart" role="img" aria-label="Views over time"></canvas>
+        <p class="chart-legend">
+          <span class="legend-line legend-initial"></span> First publication
+          <span class="legend-line legend-update"></span> Approved update
+        </p>
+        <h3>Published versions</h3>
+        <p class="table-note">Each row is a version an Editor approved; the # matches the numbered marker on the graph. All numbers count only the selected time range. The average divides a version's views by how long it was live, so versions live for different lengths of time can be compared fairly.</p>
+        <div class="table-scroll">
+          <table class="versions-table">
+            <thead>
+              <tr><th scope="col">#</th><th scope="col">Version</th><th scope="col">Approved at</th><th scope="col">Live during range</th><th scope="col">Views</th><th scope="col">Avg. views per hour</th><th scope="col">Change vs. previous version</th></tr>
+            </thead>
+            <tbody id="versions-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <%- include('../partials/footer') %>
+  <script src="/analytics.js"></script>
+</body>
+</html>

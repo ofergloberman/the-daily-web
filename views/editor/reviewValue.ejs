@@ -1,0 +1,8 @@
+<% if (!value) { %>
+  <p class="compare-empty">Empty</p>
+<% } else if (field.key === 'imageUrl') { %>
+  <p class="compare-value"><%= value %></p>
+  <% if (isHttpUrl(value)) { %><img class="compare-image" src="<%= value %>" alt=""><% } %>
+<% } else { %>
+  <p class="compare-value"><%= value %></p>
+<% } %>
