@@ -26,6 +26,7 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .page-main { flex: 1 1 0; min-width: 0; }
 .sidebar { flex: 0 0 280px; display: flex; flex-direction: column; gap: 1.5rem; }
 .sidebar-box:empty { display: none; }
+.weather-meta { font-size: 0.8rem; }
 .sidebar-box { padding: 1.25rem; border: 1px solid var(--line); background: var(--white); }
 .section-label { margin: 0 0 .7rem; color: var(--blue-dark); font-size: .88rem; font-weight: 700; }
 
