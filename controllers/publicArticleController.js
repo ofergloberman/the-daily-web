@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const Comment = require('../models/Comment');
+const { publicComment } = require('../services/comments');
 const { findPublicById, findLatestPublic } = require('../models/publicArticleQueries');
 const visits = require('../services/visits');
 
@@ -31,8 +33,12 @@ async function showArticle(req, res, next) {
     const article = await findPublicById(req.params.id);
     if (!article) return notFound(req, res);
     recordVisitSafely(article, req);
+    const comments = await Comment.find({ article: article._id })
+      .select('article displayName body createdAt')
+      .sort({ createdAt: 1, _id: 1 }).lean();
     res.render('articles/show', {
       user: req.user, article, paragraphs: paragraphs(article.published.body),
+      comments: comments.map(publicComment), styles: ['/article-comments.css'],
       title: article.published.title, description: article.published.summary
     });
   } catch (error) { next(error); }

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { app } = require('../app');
 const Article = require('../models/Article');
+const Comment = require('../models/Comment');
 const { PUBLIC_FIELDS, CARD_FIELDS } = require('../models/publicArticleQueries');
 const { FEED_SIZE, paragraphs } = require('../controllers/publicArticleController');
 const visits = require('../services/visits');
@@ -20,6 +21,17 @@ test('public article page renders only the published snapshot', async t => {
   const draftOnly = new Article({ author: author._id, draft: { title: 'Never published' } });
   const stored = [live, draftOnly];
   const selections = [];
+  let rows = [{ _id: new mongoose.Types.ObjectId(), article: live._id,
+    displayName: '<script>alert(1)</script>', body: '<img src=x onerror=alert(1)>',
+    createdAt: new Date('2026-10-02T12:00:00Z') }];
+  const commentQuery = t.mock.method(Comment, 'find', query => {
+    assert.equal(String(query.article), String(live._id));
+    return {
+      select(fields) { assert.equal(fields, 'article displayName body createdAt'); return this; },
+      sort(order) { assert.deepEqual(order, { createdAt: 1, _id: 1 }); return this; },
+      async lean() { return rows; }
+    };
+  });
 
   t.mock.method(Article, 'findOne', query => {
     let selected;
@@ -55,12 +67,24 @@ test('public article page renders only the published snapshot', async t => {
   assert.doesNotMatch(html, /Unapproved draft headline|Draft body text|Secret editor note/);
   assert.ok(selections.every(fields => fields === PUBLIC_FIELDS));
   assert.doesNotMatch(PUBLIC_FIELDS, /draft|editorNote/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<script>alert|<img src=x/);
+  assert.match(html, /data-comments-empty hidden/);
+  assert.match(html, /class="comment-form" action="\/comments"/);
+  assert.match(html, /href="\/article-comments.css"/);
+  assert.match(html, /src="\/article-comments.js" defer/);
+  rows = [];
+  const emptyHtml = await (await fetch(`${base}/articles/${live._id}`)).text();
+  assert.match(emptyHtml, /data-comments-empty>No comments yet/);
+  assert.match(emptyHtml, /name="body"/);
 
   assert.equal((await fetch(`${base}/articles/${draftOnly._id}`)).status, 404);
   assert.equal((await fetch(`${base}/articles/${new mongoose.Types.ObjectId()}`)).status, 404);
   const invalid = await fetch(`${base}/articles/not-an-id`);
   assert.equal(invalid.status, 404);
   assert.match(await invalid.text(), /Article not found/);
+  assert.equal(commentQuery.mock.callCount(), 2, 'private and invalid articles must not query comments');
 });
 
 test('article body splits into trimmed non-empty paragraphs', () => {
@@ -103,6 +127,7 @@ test('homepage lists the latest published cards without draft fields', async t =
 });
 
 test('a failing recordVisit never breaks the article page', async t => {
+  t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
   const article = { _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana' }, published: { title: 'Still readable', body: 'Body.' } };
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
   t.mock.method(console, 'error', () => {});
@@ -116,4 +141,17 @@ test('a failing recordVisit never breaks the article page', async t => {
   visits.recordVisit.mock.restore();
   t.mock.method(visits, 'recordVisit', async () => { throw new Error('async failure'); });
   assert.equal((await fetch(url)).status, 200);
+});
+
+test('comment database errors reach the request error handler', async t => {
+  const article = { _id: new mongoose.Types.ObjectId(), published: { title: 'Public', body: 'Body' } };
+  t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
+  t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { throw new Error('private database details'); } }));
+  t.mock.method(console, 'error', () => {});
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`);
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: 'INTERNAL_SERVER_ERROR' });
 });
