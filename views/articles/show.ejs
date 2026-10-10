@@ -20,8 +20,9 @@
           <% }) %>
         </div>
       </article>
-      <%# D1 fills this slot with the comments section. %>
-      <section class="comments-slot" id="comments" data-article-id="<%= article._id %>" aria-label="Comments"></section>
+      <section class="comments-slot" id="comments" data-article-id="<%= article._id %>" aria-label="Comments">
+        <%- include('../partials/comments') %>
+      </section>
     </main>
     <%- include('../partials/sidebar') %>
   </div>

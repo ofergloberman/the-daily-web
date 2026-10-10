@@ -1,0 +1,30 @@
+<h2>Comments</h2>
+<p data-comments-empty<% if (comments.length) { %> hidden<% } %>>No comments yet. Be the first to comment.</p>
+<ul class="comment-list" data-comment-list>
+  <% comments.forEach(comment => { %>
+    <li data-comment-id="<%= comment.id %>">
+      <strong><%= comment.displayName %></strong> &middot;
+      <time datetime="<%= comment.createdAt %>"><%= formatDate(comment.createdAt, 'long') %></time>
+      <p class="comment-body"><%= comment.body %></p>
+    </li>
+  <% }) %>
+</ul>
+<form class="comment-form" action="/comments" method="post" aria-describedby="comment-message">
+  <input type="hidden" name="articleId" value="<%= article._id %>">
+  <% if (user) { %>
+    <p>Commenting as <strong><%= user.displayName %></strong></p>
+  <% } else { %>
+    <div>
+      <label class="field-label" for="comment-name">Name</label>
+      <input class="field" id="comment-name" name="displayName" autocomplete="name" maxlength="100" required>
+    </div>
+  <% } %>
+  <div>
+    <label class="field-label" for="comment-body">Comment</label>
+    <textarea class="field" id="comment-body" name="body" rows="4" maxlength="2000" required aria-describedby="comment-help"></textarea>
+    <p id="comment-help">Up to 2,000 characters.<% if (!user) { %> Guests may post three comments per minute.<% } %></p>
+  </div>
+  <button class="primary-button" type="submit">Post comment</button>
+  <p id="comment-message" data-comment-message role="status" aria-live="polite" aria-atomic="true"></p>
+</form>
+<script src="/article-comments.js" defer></script>
