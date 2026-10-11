@@ -15,3 +15,32 @@ Deletion rejects any reference in `Article.author` (any status and either versio
 **Offline write precondition:** stop every application process, other maintenance command and seed/import writer before create/update/reset/delete; restart after completion. The CLI requires `--offline` to acknowledge this. Read/list can run online. Transactions alone do not prevent concurrent inserts of references or login sessions because MongoDB has no foreign-key locking. D2/D4 must preserve this precondition or add shared locking to every reference writer before enabling online account maintenance. New User reference fields must be added to deletion blockers and lifecycle tests before use.
 
 Review checklist for D2/D4: confirm the three reference fields and reject-deletion policy, historical display-name behavior, offline write precondition, role-change effects, and the CSRF contract in CSRF.md. No teammate messaging or approval is assumed.
+
+## Commands
+
+Configure `MONGODB_URI` in the ignored `.env`. Stop all writers for write commands; `--offline` acknowledges this requirement, it does not stop processes automatically. Run passwords in an interactive terminal; piped input is rejected. Exit status 1 indicates failure. Output contains only safe profile fields (deletion returns the deleted profile).
+
+```powershell
+npm run users -- create --username reporter1 --display-name 'Reporter One' --role reporter --offline
+npm run users -- read --username reporter1
+npm run users -- read --id 0123456789abcdef01234567
+npm run users -- list --search rep --limit 20 --offset 0
+npm run users -- update --username reporter1 --new-username reporter2 --display-name 'Reporter Two' --offline
+npm run users -- update --username reporter2 --role editor --offline
+npm run users -- reset-password --username reporter2 --offline
+npm run users -- delete --username reporter2 --offline
+```
+
+Search is a literal normalized username prefix; `--id` and `--username` are mutually exclusive selectors. Update accepts one or more of `--new-username`, `--display-name`, `--role`. Unknown/repeated flags, password flags and extra arguments are rejected. The legacy `npm run create-user -- reporter1 'Reporter One' reporter --offline` delegates to the same implementation.
+
+## Verification
+
+`node --test test/user-maintenance.test.js` covers validation, CLI parsing, private password entry and safe failure output without MongoDB. Real lifecycle verification uses a dedicated disposable replica-set database:
+
+```powershell
+$env:USERS_TEST_MONGODB_URI = 'mongodb://127.0.0.1:27018/the_daily_web_users_test_012345abcdef?replicaSet=rs0'
+node --test test/user-maintenance.integration.test.js
+Remove-Item Env:USERS_TEST_MONGODB_URI
+```
+
+The integration suite requires a database named `the_daily_web_users_test_<hex>`; it requires the database to be empty and drops it after testing. Never point it at application data. It tests every operation, duplicates, revocation, reference blockers and transaction rollback. Without the variable the database suite is explicitly skipped.
