@@ -1,5 +1,5 @@
 <%# Expects `article`: { _id, published: { title, summary, category, imageUrl }, author: { displayName }, publishedAt } %>
-<article class="article-card">
+<article class="article-card" data-id="<%= article._id %>">
   <% if (article.published.imageUrl) { %><img class="card-image" src="<%= article.published.imageUrl %>" alt="" loading="lazy"><% } %>
   <div class="card-body">
     <% if (article.published.category) { %><p class="card-category"><%= article.published.category %></p><% } %>
