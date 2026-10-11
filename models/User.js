@@ -11,9 +11,7 @@ const userSchema = new mongoose.Schema({
     type: String, required: true, select: false,
     validate: { validator: value => /^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/.test(value), message: 'Use setPassword to create a password hash.' }
   },
-  role: { type: String, enum: [ROLES.REPORTER, ROLES.EDITOR], required: true },
-  // Sessions issued before a credential/role change cannot become valid again.
-  authVersion: { type: Number, default: 0, min: 0 }
+  role: { type: String, enum: Object.values(ROLES), default: ROLES.GUEST, required: true }
 }, { timestamps: true });
 
 userSchema.set('toJSON', { transform(_doc, result) { delete result.passwordHash; return result; } });

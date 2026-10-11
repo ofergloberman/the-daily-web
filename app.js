@@ -6,14 +6,12 @@ const { loadUser, requireReporter, requireEditor } = require('./middleware/auth'
 const { deviceIdentity } = require('./middleware/deviceIdentity');
 const { showHome } = require('./controllers/publicArticleController');
 const { formatDate } = require('./helpers/dates');
-const { applicationOrigin, csrfProtection } = require('./middleware/csrf');
 
 const app = express();
 app.disable('x-powered-by');
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.locals.formatDate = formatDate;
-app.use(csrfProtection);
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -40,7 +38,6 @@ app.use((error, _req, res, _next) => {
 });
 
 async function start() {
-  applicationOrigin();
   const port = Number(process.env.PORT || 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535.');
   await connectDatabase(process.env.MONGODB_URI);
@@ -62,7 +59,7 @@ async function start() {
 
 if (require.main === module) {
   start().catch(async () => {
-    console.error('Startup failed. Check APP_ORIGIN, PORT, MONGODB_URI, MongoDB availability and transaction support.');
+    console.error('Startup failed. Check PORT, MONGODB_URI, MongoDB availability and transaction support.');
     await mongoose.disconnect();
     process.exitCode = 1;
   });

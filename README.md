@@ -23,25 +23,18 @@ After the database connection and transaction check succeed, the server listens 
 
 ### Create the first account
 
-Run this in an interactive terminal after configuring MongoDB. The command prompts privately for a password and confirmation; passwords are not supplied in arguments or environment variables.
+Run this in PowerShell after configuring MongoDB. The password is read privately and passed to the local process through a temporary environment variable; it is never written to the repository.
 
 ```powershell
-npm run create-user -- reporter1 'Reporter One' reporter
+$secret = Read-Host 'New password (8-128 characters)' -AsSecureString
+$env:NEW_USER_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
+try { npm run create-user -- reporter1 'Reporter One' reporter }
+finally { Remove-Item Env:NEW_USER_PASSWORD }
 ```
 
 Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, where they browse all articles, review submissions, and open `/analytics`. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
 
-## Account maintenance and CSRF
-
-Use `npm run users -- --help` for local account creation, lookup, bounded search,
-updates, password resets and guarded deletion. Set `APP_ORIGIN` in `.env` to the
-browser address (`http://localhost:3000` locally; explicit HTTPS in production).
-All state-changing HTTP requests require a matching Origin, or same-origin
-Referer when Origin is absent. See [the detailed maintenance rules, commands,
-CSRF contract, tests and D2/D4 review checklist](README.user-maintenance-csrf.md).
-
 ## Project structure
-
 
 ```text
 app.js                             Express setup, database connection, and server startup

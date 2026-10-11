@@ -36,7 +36,7 @@ async function login(req, res, next) {
     const oldToken = readSessionToken(req.headers.cookie);
     if (oldToken) await Session.deleteOne({ tokenHash: hashToken(oldToken) });
     const token = randomBytes(32).toString('hex');
-    await Session.create({ tokenHash: hashToken(token), user: user._id, authVersion: user.authVersion ?? 0, expiresAt: new Date(Date.now() + SESSION_AGE_MS) });
+    await Session.create({ tokenHash: hashToken(token), user: user._id, expiresAt: new Date(Date.now() + SESSION_AGE_MS) });
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production',
       path: '/', maxAge: SESSION_AGE_MS

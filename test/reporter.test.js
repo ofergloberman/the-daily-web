@@ -106,8 +106,7 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
-  process.env.APP_ORIGIN = base;
-  const headers = token => ({ Origin: base, Cookie: `wd_session=${token}` });
+  const headers = token => ({ Cookie: `wd_session=${token}` });
   const full = { title: 'News', summary: 'Summary', body: 'Story', category: 'World', imageUrl: 'https://example.com/photo.jpg' };
   const patch = (token, id, body) => fetch(`${base}/reporter/articles/${id}/draft`, {
     method: 'PATCH', headers: { ...headers(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body)

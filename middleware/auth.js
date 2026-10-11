@@ -20,8 +20,7 @@ async function loadUser(req, res, next) {
     const token = readSessionToken(req.headers.cookie);
     if (!token) return next();
     const session = await Session.findOne({ tokenHash: hashToken(token), expiresAt: { $gt: new Date() } }).populate('user');
-    if (session?.user && (session.authVersion ?? 0) === (session.user.authVersion ?? 0) &&
-        [ROLES.REPORTER, ROLES.EDITOR].includes(session.user.role)) {
+    if (session?.user && [ROLES.REPORTER, ROLES.EDITOR].includes(session.user.role)) {
       req.user = session.user;
       req.session = session;
     } else {

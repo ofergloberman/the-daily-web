@@ -45,13 +45,12 @@ test('comments API and atomic limiter against real MongoDB', { skip: !uri && 'Se
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
-  process.env.APP_ORIGIN = base;
   const cookie = deviceId => `wd_device=${deviceId}`;
   const device = () => randomBytes(32).toString('hex');
   async function post(articleId, deviceId, changes = {}, session = '') {
     const response = await fetch(`${base}/comments`, {
       method: 'POST',
-      headers: { Origin: base, 'Content-Type': 'application/json', Cookie: `${cookie(deviceId)}${session ? `; wd_session=${session}` : ''}` },
+      headers: { 'Content-Type': 'application/json', Cookie: `${cookie(deviceId)}${session ? `; wd_session=${session}` : ''}` },
       body: JSON.stringify({ articleId: String(articleId), displayName: '  Guest  ', body: '  Hello  ', ...changes })
     });
     return { status: response.status, headers: response.headers, data: await response.json() };
@@ -109,14 +108,14 @@ test('comments API and atomic limiter against real MongoDB', { skip: !uri && 'Se
   assert.equal((await fetch(`${base}/comments?articleId=${first._id}&cursor=bad`)).status, 400);
 
   const editUrl = `${base}/comments/${created.data.comment.id}`;
-  assert.equal((await fetch(editUrl, { method: 'PATCH', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Changed' }) })).status, 401);
-  assert.equal((await fetch(editUrl, { method: 'DELETE', headers: { Origin: base, Cookie: `wd_session=${sessionToken}` } })).status, 403);
+  assert.equal((await fetch(editUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Changed' }) })).status, 401);
+  assert.equal((await fetch(editUrl, { method: 'DELETE', headers: { Cookie: `wd_session=${sessionToken}` } })).status, 403);
   const editorToken = randomBytes(32).toString('hex');
   await Session.create({ tokenHash: hashToken(editorToken), user: editor._id, expiresAt: new Date(Date.now() + 600000) });
-  const edit = await fetch(editUrl, { method: 'PATCH', headers: { Origin: base, Cookie: `wd_session=${editorToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: ' Changed ' }) });
+  const edit = await fetch(editUrl, { method: 'PATCH', headers: { Cookie: `wd_session=${editorToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: ' Changed ' }) });
   assert.equal(edit.status, 200);
   assert.equal((await edit.json()).comment.body, 'Changed');
-  assert.equal((await fetch(editUrl, { method: 'DELETE', headers: { Origin: base, Cookie: `wd_session=${editorToken}` } })).status, 204);
+  assert.equal((await fetch(editUrl, { method: 'DELETE', headers: { Cookie: `wd_session=${editorToken}` } })).status, 204);
 
   const boundaryDevice = device();
   const boundaryKey = createHash('sha256').update(boundaryDevice).digest('hex');

@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const sessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true, select: false },
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  authVersion: { type: Number, default: 0, min: 0 },
   expiresAt: { type: Date, required: true }
 }, { timestamps: true });
 
