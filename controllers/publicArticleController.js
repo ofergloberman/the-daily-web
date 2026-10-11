@@ -48,8 +48,14 @@ function recordVisitSafely(article, req) {
 }
 
 // Viewed membership is a convenience for the feed filter; failing to store it must not break the page.
+// Only browsers that already sent their device cookie are recorded: a cookieless client (crawler, link
+// preview, curl) gets a new random id on every request and could never read that history back.
+function cameWithDeviceCookie(req) {
+  return Boolean(req.deviceId) && (req.headers.cookie || '').split(';').some(part => part.trim() === `wd_device=${req.deviceId}`);
+}
+
 function markViewedSafely(article, req) {
-  if (!req.deviceId) return;
+  if (req.method !== 'GET' || !cameWithDeviceCookie(req)) return;
   Promise.resolve().then(() => ViewedArticle.markViewed(req.deviceId, article._id))
     .catch(error => console.error('Viewed state not saved:', error?.name));
 }
@@ -63,6 +69,7 @@ async function listArticles(req, res, next) {
   if (fields) return res.status(400).json({ error: 'INVALID_FEED_QUERY', message: 'Check the search, filter and sort values.', fields });
   try {
     const { articles, hasMore, nextCursor } = await findFeed({ ...value, deviceId: req.deviceId, limit: FEED_SIZE });
+    res.set('Cache-Control', 'private, no-cache'); // Viewed flags differ per device.
     res.json({ data: articles.map(cardJson), pagination: { nextCursor, hasMore } });
   } catch (error) { next(error); }
 }

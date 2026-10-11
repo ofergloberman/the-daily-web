@@ -8,16 +8,22 @@ const vm = require('node:vm');
 const script = fs.readFileSync(path.join(__dirname, '../public/feed.js'), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function node(tag = 'div') {
+function node(tag = 'div', className = '') {
   const listeners = {};
+  const hasClass = (el, name) => typeof el === 'object' && el.className.split(' ').includes(name);
+  const all = (root, name) => root.children.flatMap(child => typeof child === 'object' ? [...(hasClass(child, name) ? [child] : []), ...all(child, name)] : []);
   const el = {
-    tag, children: [], dataset: {}, className: '', hidden: false, value: '', _text: '',
+    tag, className, children: [], dataset: {}, hidden: false, value: '', _text: '', parent: null,
     get textContent() { return this._text + this.children.map(c => (typeof c === 'string' ? c : c.textContent)).join(''); },
     set textContent(value) { this._text = String(value); this.children = []; },
-    append(...items) { this.children.push(...items); },
+    append(...items) { for (const item of items) { if (typeof item === 'object') item.parent = el; this.children.push(item); } },
+    prepend(item) { item.parent = el; this.children.unshift(item); },
     replaceChildren() { this.children = []; },
-    remove() { el.removed = true; },
-    querySelectorAll() { return []; },
+    remove() { el.removed = true; if (el.parent) el.parent.children = el.parent.children.filter(c => c !== el); },
+    // Only ".class" selectors, which is all feed.js uses.
+    querySelectorAll(selector) { return all(el, selector.slice(1)); },
+    querySelector(selector) { return all(el, selector.slice(1))[0] || null; },
+    closest(selector) { let at = el; while (at && !(selector === 'a' ? at.tag === 'a' : hasClass(at, selector.slice(1)))) at = at.parent; return at || null; },
     setAttribute(name, value) { this[`attr:${name}`] = value; },
     removeAttribute(name) { delete this[`attr:${name}`]; },
     getBoundingClientRect() { return { top: 0 }; }, // The sentinel is always in view.
@@ -28,27 +34,50 @@ function node(tag = 'div') {
   return el;
 }
 
-function page({ cursor = 'cursor-1', fetch, navigation = 'navigate' }) {
+// A card as the server renders it: article.article-card > div.card-body > [p.card-category] h2 > a.
+function serverCard(id, category = '') {
+  const card = node('article', 'article-card');
+  card.dataset.id = id;
+  const body = node('div', 'card-body');
+  if (category) { const label = node('p', 'card-category'); label.textContent = category; body.append(label); }
+  const title = node('h2', 'card-title');
+  title.append(node('a'));
+  body.append(title);
+  card.append(body);
+  return card;
+}
+
+function page({ cursor = 'cursor-1', fetch, navigation = 'navigate', cards = [], viewed = 'all', search = '', stored = null }) {
   const feed = node('section');
   feed.dataset.nextCursor = cursor;
+  feed.append(...cards);
   const form = node('form');
   form.q = node('input'); form.category = node('select'); form.sort = node('select'); form.viewed = node('select');
-  form.sort.value = 'date'; form.viewed.value = 'all';
+  form.sort.value = 'date'; form.viewed.value = viewed;
   const els = { 'feed-controls': form, feed, 'feed-sentinel': node(), 'feed-status': node('p'), 'feed-apply': node('button'), 'feed-more': null };
   let observer;
+  const windowListeners = {};
+  const storage = new Map(stored ? [['feed:return', JSON.stringify(stored)]] : []);
+  const scrolls = [];
   const history = { entries: [], pushState(_s, _t, url) { this.entries.push(url); context.location.search = url.slice(1); } };
   const context = {
     document: { getElementById: id => els[id], createElement: node },
-    fetch, history, location: { pathname: '/', search: '' }, innerHeight: 800,
+    fetch, history, location: { pathname: '/', search }, innerHeight: 800, scrollY: 1234,
     FormData: class { constructor(f) { this.f = f; } get(name) { return this.f[name].value; } },
     IntersectionObserver: class { constructor(callback) { observer = () => callback([{ isIntersecting: true }]); } observe() {} },
     AbortController, URLSearchParams, Intl, setTimeout, clearTimeout,
-    scrollTo() {}, addEventListener() {},
+    scrollTo(...args) { scrolls.push(args); },
+    addEventListener(type, callback) { (windowListeners[type] ||= []).push(callback); },
+    sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     performance: { getEntriesByType: () => [{ type: navigation }] }
   };
   context.window = context;
   vm.runInNewContext(script, context);
-  return { feed, form, status: els['feed-status'], scroll: () => observer(), history };
+  return {
+    feed, form, status: els['feed-status'], scroll: () => observer(), history, scrolls,
+    stored: () => JSON.parse(storage.get('feed:return') || 'null'),
+    pageshow: persisted => (windowListeners.pageshow || []).forEach(callback => callback({ persisted }))
+  };
 }
 
 const article = id => ({ id, title: `Title ${id}`, summary: '', category: '', imageUrl: '', author: 'A', publishedAt: '2026-10-01T10:00:00.000Z' });
@@ -106,14 +135,57 @@ test('no duplicate request while loading, and no duplicate cards across pages', 
   assert.match(view.status.textContent, /reached the end/);
 });
 
-test('returning with Back reloads the first page so viewed state is current', async () => {
+test('opening an article remembers it with the reader position', () => {
+  const cards = ['p0', 'p1', 'p2'].map(id => serverCard(id));
+  const view = page({ cards, fetch: async () => ok([]) });
+  const link = cards[1].querySelector('.card-title').children[0];
+  view.feed.dispatch('click', { target: link });
+  assert.deepEqual(view.stored(), { search: '', count: 3, scrollY: 1234, opened: ['p1'] });
+  view.feed.dispatch('click', { target: cards[1] }); // a click on the card but not its link is ignored
+  view.feed.dispatch('click', { target: cards[2].querySelector('.card-title').children[0] });
+  assert.deepEqual(view.stored().opened, ['p1', 'p2']);
+});
+
+test('Back to the cached first page reloads the batches the reader had and restores scroll', async () => {
+  const cards = Array.from({ length: 20 }, (_, i) => serverCard(`p${i}`, i === 3 ? 'World' : ''));
   const calls = [];
-  page({ cursor: 'cursor-1', navigation: 'back_forward', fetch: async url => { calls.push(url); return ok([article('x')]); } });
+  const batches = [ok(Array.from({ length: 20 }, (_, i) => article(`q${i}`)), 'cursor-2'), ok(Array.from({ length: 5 }, (_, i) => article(`r${i}`)))];
+  const view = page({
+    cards, navigation: 'back_forward',
+    stored: { search: '', count: 45, scrollY: 3000, opened: ['p3', 'p7', 'q2'] },
+    fetch: async url => { calls.push(url); return batches[calls.length - 1]; }
+  });
+  for (let i = 0; i < 15; i++) await flush();
+  assert.equal(calls.length, 2, 'two more batches, not a reload from the top');
+  assert.match(calls[0], /cursor=cursor-1/);
+  assert.equal(view.feed.querySelectorAll('.article-card').length, 45);
+  const badged = view.feed.querySelectorAll('.article-card').filter(c => c.querySelector('.viewed-badge')).map(c => c.dataset.id);
+  assert.deepEqual(badged, ['p3', 'p7', 'q2'], 'cached cards and reloaded cards opened earlier are marked');
+  assert.match(view.feed.querySelectorAll('.article-card')[3].querySelector('.card-category').textContent, /^World, Viewed$/);
+  assert.deepEqual(view.scrolls.at(-1), [0, 3000]);
+});
+
+test('Back from memory under "Not viewed yet" removes the article just read without any request', async () => {
+  const calls = [];
+  const cards = ['p0', 'p1', 'p2'].map(id => serverCard(id));
+  const view = page({ cards, viewed: 'unviewed', search: '?viewed=unviewed', cursor: '', stored: { search: '?viewed=unviewed', count: 3, scrollY: 0, opened: ['p1'] }, fetch: async url => { calls.push(url); return ok([]); } });
+  view.pageshow(false);
+  assert.equal(view.feed.querySelectorAll('.article-card').length, 3, 'a normal page show changes nothing');
+  view.pageshow(true);
   await flush();
-  assert.equal(calls.length, 1);
-  assert.doesNotMatch(calls[0], /cursor=/, 'a fresh first page, not the next batch');
-  const fresh = [];
-  page({ fetch: async url => { fresh.push(url); return ok([]); } });
+  assert.deepEqual(view.feed.querySelectorAll('.article-card').map(c => c.dataset.id), ['p0', 'p2']);
+  assert.equal(calls.length, 0);
+});
+
+test('Back is ignored when the saved state belongs to other filters or storage is empty', async () => {
+  const calls = [];
+  const cards = ['p0', 'p1'].map(id => serverCard(id));
+  const view = page({ cards, navigation: 'back_forward', search: '?q=vote', stored: { search: '', count: 40, scrollY: 900, opened: ['p1'] }, fetch: async url => { calls.push(url); return ok([]); } });
   await flush();
-  assert.equal(fresh.length, 0, 'a normal visit uses the server-rendered page as is');
+  assert.equal(calls.length, 0);
+  assert.equal(view.feed.querySelectorAll('.viewed-badge').length, 0);
+  assert.deepEqual(view.scrolls, []);
+  page({ navigation: 'back_forward', fetch: async url => { calls.push(url); return ok([]); } });
+  await flush();
+  assert.equal(calls.length, 0);
 });

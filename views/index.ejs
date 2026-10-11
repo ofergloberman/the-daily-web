@@ -30,7 +30,8 @@
       <p class="feed-status" id="feed-status" role="status" aria-live="polite"></p>
       <section class="article-list" id="feed" aria-label="Articles" data-next-cursor="<%= nextCursor || '' %>">
         <% if (!articles.length) { %>
-          <div class="empty-state"><h2><%= filters.q || filters.category || filters.viewed !== 'all' ? 'No matching articles' : 'No articles yet' %></h2><p><%= filters.q || filters.category || filters.viewed !== 'all' ? 'Try another search, category or view filter.' : 'Published stories will appear here.' %></p></div>
+          <% const filtered = filters.q || filters.category || filters.viewed !== 'all'; const nothingViewed = filters.viewed === 'viewed' && !filters.q && !filters.category; %>
+          <div class="empty-state"><h2><%= nothingViewed ? 'Nothing viewed yet' : filtered ? 'No matching articles' : 'No articles yet' %></h2><p><%= nothingViewed ? 'Articles you open on this device will appear here.' : filtered ? 'Try another search, category or view filter.' : 'Published stories will appear here.' %></p></div>
         <% } else { articles.forEach(article => { %>
           <%- include('partials/articleCard', { article }) %>
         <% }) } %>

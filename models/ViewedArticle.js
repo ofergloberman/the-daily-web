@@ -9,6 +9,9 @@ const viewedArticleSchema = new mongoose.Schema({
 }, { versionKey: false });
 
 viewedArticleSchema.index({ deviceId: 1, article: 1 }, { unique: true });
+viewedArticleSchema.index({ article: 1 }); // Cleanup when an article is deleted.
+// The device cookie lives a year (middleware/deviceIdentity.js), so older history can no longer be read.
+viewedArticleSchema.index({ firstViewedAt: 1 }, { expireAfterSeconds: 365 * 24 * 60 * 60 });
 
 const DUPLICATE_KEY_ERROR = 11000;
 

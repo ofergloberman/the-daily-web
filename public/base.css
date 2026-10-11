@@ -8,6 +8,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--blue-dark); }
 img { max-width: 100%; height: auto; }
 [hidden] { display: none !important; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #76b8e4; outline-offset: 2px; }
 h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap: anywhere; }
 

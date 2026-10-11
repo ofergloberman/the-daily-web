@@ -34,7 +34,6 @@ test('public article page renders only the published snapshot', async t => {
     };
   });
 
-  t.mock.method(visits, 'recordVisit', async () => {});
   t.mock.method(ViewedArticle, 'markViewed', async () => {});
   t.mock.method(visits, 'recordVisit', async () => {}); // D4 analytics would otherwise wait for a database.
   t.mock.method(Article, 'findOne', query => {
@@ -135,7 +134,8 @@ test('opening an article marks it viewed for this device only, and a failure nev
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
   t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
   t.mock.method(console, 'error', () => {});
-  t.mock.method(visits, 'recordVisit', async () => {});
+  const visitsRecorded = [];
+  t.mock.method(visits, 'recordVisit', async visited => { visitsRecorded.push(String(visited._id)); });
   const marks = [];
   t.mock.method(ViewedArticle, 'markViewed', async (deviceId, articleId) => { marks.push([deviceId, String(articleId)]); });
   const server = app.listen(0, '127.0.0.1');
@@ -147,6 +147,18 @@ test('opening an article marks it viewed for this device only, and a failure nev
   assert.equal((await fetch(url, { headers: { Cookie: `wd_device=${device}` } })).status, 200);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(marks, [[device, String(article._id)]]);
+  await fetch(url, { headers: { Cookie: `wd_device=${device}` } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(visitsRecorded.length, 2, 'every visit still counts in D4 analytics');
+  assert.equal(marks.length, 2, 'each visit with a cookie asks to mark; the upsert makes repeats harmless');
+
+  const cookieless = await fetch(url);
+  assert.equal(cookieless.status, 200);
+  assert.match(cookieless.headers.get('set-cookie'), /^wd_device=/);
+  assert.equal((await fetch(url, { method: 'HEAD', headers: { Cookie: `wd_device=${device}` } })).status, 200);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(marks.length, 2, 'no record for a cookieless client (new random id each time) or a HEAD request');
+  assert.equal(visitsRecorded.length, 4, 'analytics counting is unchanged for those requests');
 
   ViewedArticle.markViewed.mock.restore();
   t.mock.method(ViewedArticle, 'markViewed', async () => { throw new Error('db down'); });

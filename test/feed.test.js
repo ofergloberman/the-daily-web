@@ -169,7 +169,7 @@ test('homepage renders filters, categories and a no-JS "More articles" link', as
 });
 
 test('viewed filters join on this device inside MongoDB, after sorting and before the limit', async t => {
-  const { viewedPipeline } = require('../models/publicArticleQueries');
+  const { viewedPipeline, deviceHistoryPipeline } = require('../models/publicArticleQueries');
   const filter = { published: { $ne: null } };
   const pipeline = viewedPipeline({ filter, sort: 'popular', viewed: 'unviewed', deviceId: 'd'.repeat(64), limit: 20 });
   assert.deepEqual(pipeline.map(stage => Object.keys(stage)[0]), ['$match', '$sort', '$lookup', '$match', '$limit', '$project']);
@@ -181,15 +181,31 @@ test('viewed filters join on this device inside MongoDB, after sorting and befor
   assert.equal(pipeline[4].$limit, FEED_SIZE + 1);
   assert.ok(!('draft' in pipeline[5].$project) && !('editorNote' in pipeline[5].$project) && !('published.body' in pipeline[5].$project));
 
-  const pipelines = [];
+  const history = deviceHistoryPipeline({ filter, sort: 'date', deviceId: 'd'.repeat(64), limit: 20 });
+  assert.deepEqual(history[0], { $match: { deviceId: 'd'.repeat(64) } }, '"viewed" starts from the device history');
+  assert.equal(history[1].$lookup.pipeline[0].$match, filter);
+  assert.deepEqual(history.slice(-2), [{ $sort: { publishedAt: -1, _id: -1 } }, { $limit: FEED_SIZE + 1 }]);
+
+  const articlePipelines = [], historyPipelines = [];
   const doc = { _id: new mongoose.Types.ObjectId(), publishedAt: new Date(), totalViews: 0, published: { title: 'Seen before', category: 'World' } };
-  t.mock.method(Article, 'aggregate', async stages => { pipelines.push(stages); return [doc]; });
+  t.mock.method(Article, 'aggregate', async stages => { articlePipelines.push(stages); return [doc]; });
+  t.mock.method(ViewedArticle, 'aggregate', async stages => { historyPipelines.push(stages); return [doc]; });
   t.mock.method(Article, 'populate', async docs => docs.map(d => ({ ...d, author: { displayName: 'Dana' } })));
   const base = await listen(t);
   const device = 'e'.repeat(64);
-  const response = await fetch(`${base}/articles?viewed=viewed`, { headers: { Cookie: `wd_device=${device}` } });
+  const headers = { Cookie: `wd_device=${device}` };
+  const response = await fetch(`${base}/articles?viewed=viewed&category=World`, { headers });
+  assert.equal(response.headers.get('cache-control'), 'private, no-cache', 'per-device results must not be shared by caches');
   const { data } = await response.json();
-  assert.equal(pipelines[0][2].$lookup.pipeline[0].$match.deviceId, device, 'the cookie device, never one from the query string');
+  assert.equal(historyPipelines[0][0].$match.deviceId, device, 'the cookie device, never one from the query string');
+  assert.equal(historyPipelines[0][1].$lookup.pipeline[0].$match['published.category'], 'World');
   assert.deepEqual(data.map(article => [article.title, article.viewed]), [['Seen before', true]]);
+
+  await fetch(`${base}/articles?viewed=unviewed&category=World&sort=popular`, { headers });
+  await fetch(`${base}/articles?viewed=viewed&q=vote`, { headers });
+  assert.deepEqual(articlePipelines.map(p => p[3].$match), [{ viewedBy: { $eq: [] } }, { viewedBy: { $ne: [] } }], 'unviewed, and viewed+search, walk the articles');
+  assert.equal(articlePipelines[0][2].$lookup.pipeline[0].$match.deviceId, device);
+  assert.equal(articlePipelines[0][0].$match['published.category'], 'World');
+  assert.deepEqual(articlePipelines[1][0].$match.$text, { $search: 'vote' });
   assert.equal((await fetch(`${base}/articles?viewed=sometimes`)).status, 400);
 });
