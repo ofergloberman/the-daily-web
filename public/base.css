@@ -7,6 +7,7 @@ button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--blue-dark); }
 img { max-width: 100%; height: auto; }
+[hidden] { display: none !important; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #76b8e4; outline-offset: 2px; }
 h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap: anywhere; }
 
@@ -35,13 +36,24 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .primary-button:hover { background: var(--blue-dark); }
 .primary-button:disabled { opacity: .6; cursor: not-allowed; }
 .field-label { display: block; margin: 0 0 .4rem; font-size: .9rem; font-weight: 700; }
-.field { padding: .65rem .8rem; border: 1px solid #aebfc9; border-radius: .2rem; background: var(--white); color: var(--ink); }
+.field { padding: .65rem .8rem; border: 1px solid #7d8f9c; border-radius: .2rem; background: var(--white); color: var(--ink); }
 .empty-state { max-width: 37rem; border-top: 2px solid var(--ink); padding-top: 2rem; }
 .empty-state h2 { margin: 0; font-size: 1.7rem; }
 .empty-state p { color: var(--muted); }
 .notice { padding: .8rem 1rem; border-left: 4px solid var(--blue); background: var(--pale); }
 .notice-error { border-color: var(--error); background: #f9e8e6; color: var(--error); }
 .loading { color: var(--muted); font-style: italic; }
+
+/* Feed controls */
+.feed-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; margin: 0 0 1.5rem; padding: 1rem; border: 1px solid var(--line); background: var(--white); }
+.feed-controls .control { flex: 1 1 160px; min-width: 0; }
+.feed-controls .control:first-child { flex: 2 1 240px; }
+.feed-controls .field { width: 100%; }
+.feed-status { min-height: 1.5rem; margin: 0 0 .5rem; color: var(--muted); font-size: .9rem; }
+.feed-status:empty { margin: 0; min-height: 0; }
+.more-link { display: inline-block; margin-top: 1.5rem; font-weight: 700; }
+#feed-sentinel { height: 1px; }
+#feed[aria-busy='true'] { opacity: .55; transition: opacity .15s; }
 
 /* Article cards (feed) */
 .article-list { display: flex; flex-direction: column; }

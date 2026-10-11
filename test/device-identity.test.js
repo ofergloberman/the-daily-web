@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { deviceIdentity } = require('../middleware/deviceIdentity');
 const { app } = require('../app');
-const Article = require('../models/Article');
+const { mockEmptyFeed } = require('./feedMocks');
 
 function restoreEnvironmentAfter(t) {
   const previous = process.env.NODE_ENV;
@@ -66,10 +66,7 @@ test('cookie attributes persist for one year and are Secure only in production',
 test('application mounts device identity before homepage, article, and comment handlers', async t => {
   restoreEnvironmentAfter(t);
   process.env.NODE_ENV = 'production';
-  t.mock.method(Article, 'find', () => ({
-    select() { return this; }, sort() { return this; }, limit() { return this; },
-    populate() { return this; }, async lean() { return []; }
-  }));
+  mockEmptyFeed(t);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
