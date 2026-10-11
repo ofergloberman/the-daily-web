@@ -9,4 +9,5 @@ const publicationEventSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 publicationEventSchema.index({ article: 1, publishedAt: 1 });
+publicationEventSchema.index({ editor: 1 });
 module.exports = mongoose.model('PublicationEvent', publicationEventSchema);

@@ -8,4 +8,5 @@ const commentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 commentSchema.index({ article: 1, createdAt: -1, _id: -1 });
+commentSchema.index({ author: 1 });
 module.exports = mongoose.model('Comment', commentSchema);

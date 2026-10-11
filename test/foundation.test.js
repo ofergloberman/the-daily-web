@@ -7,11 +7,13 @@ const Article = require('../models/Article');
 const Comment = require('../models/Comment');
 
 test('models reject invalid roles, statuses and empty comments; drafts stay separate', async () => {
-  const user = new User({ username: ' Writer ', displayName: 'Writer' });
+  const user = new User({ username: ' Writer ', displayName: 'Writer', role: 'reporter' });
   await user.setPassword('test-password');
   await user.validate();
   assert.equal(user.username, 'writer');
-  assert.equal(user.role, 'guest');
+  assert.equal(user.role, 'reporter');
+  user.role = 'guest';
+  await assert.rejects(user.validate(), error => Boolean(error.errors.role));
   assert.equal(user.toJSON().passwordHash, undefined);
   user.role = 'admin';
   await assert.rejects(user.validate(), error => Boolean(error.errors.role));
@@ -32,13 +34,14 @@ test('HTTP foundation renders, exposes remaining placeholders and handles invali
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  process.env.APP_ORIGIN = base;
   assert.match(await (await fetch(base)).text(), /The Daily Web/);
   assert.equal((await fetch(`${base}/health`)).status, 503);
   assert.equal((await fetch(`${base}/auth`)).status, 200);
   assert.equal((await fetch(`${base}/articles`)).status, 501);
   assert.equal((await fetch(`${base}/comments`)).status, 400);
   assert.equal((await fetch(`${base}/missing`)).status, 404);
-  const invalid = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
+  const invalid = await fetch(`${base}/auth/login`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{' });
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).error, 'INVALID_JSON');
 });
