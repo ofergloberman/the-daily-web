@@ -13,6 +13,8 @@ Copy-Item .env.example .env
 
 Set `MONGODB_URI` in `.env` to your transaction-capable database connection string. The example file uses a local replica set on port 27018. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
 
+Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer; requests missing both are rejected. See [Shared CSRF integration contract](CSRF.md) for forms, AJAX, proxy configuration and D2/D4 review details.
+
 ```powershell
 npm run dev
 # Or run without watching for file changes:
