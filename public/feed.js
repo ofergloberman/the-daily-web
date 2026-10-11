@@ -21,7 +21,7 @@
 
   function params() {
     const data = new FormData(form);
-    return { q: String(data.get('q') || '').trim(), category: String(data.get('category') || ''), sort: String(data.get('sort') || 'date') };
+    return { q: String(data.get('q') || '').trim(), category: String(data.get('category') || ''), sort: String(data.get('sort') || 'date'), viewed: String(data.get('viewed') || 'all') };
   }
 
   function setStatus(text, retry) {
@@ -52,7 +52,11 @@
       root.append(img);
     }
     const body = element('div', 'card-body');
-    if (article.category) body.append(element('p', 'card-category', article.category));
+    if (article.category || article.viewed) {
+      const label = element('p', 'card-category', article.category);
+      if (article.viewed) label.append(' ', element('span', 'viewed-badge', 'Viewed'));
+      body.append(label);
+    }
     const title = element('h2', 'card-title');
     const link = element('a', '', article.title || 'Untitled article');
     link.href = `/articles/${encodeURIComponent(article.id)}`;
@@ -68,10 +72,11 @@
     return root;
   }
 
-  function showEmpty({ q, category }) {
+  function showEmpty({ q, category, viewed }) {
+    const filtered = q || category || viewed !== 'all';
     const box = element('div', 'empty-state');
-    box.append(element('h2', '', q || category ? 'No matching articles' : 'No articles yet'));
-    box.append(element('p', '', q || category ? 'Try another search or category.' : 'Published stories will appear here.'));
+    box.append(element('h2', '', filtered ? 'No matching articles' : 'No articles yet'));
+    box.append(element('p', '', filtered ? 'Try another search, category or view filter.' : 'Published stories will appear here.'));
     feed.append(box);
   }
 
@@ -124,7 +129,7 @@
   function applyFilters() {
     clearTimeout(searchTimer);
     const current = params();
-    const query = new URLSearchParams(Object.entries(current).filter(([key, value]) => value && !(key === 'sort' && value === 'date')));
+    const query = new URLSearchParams(Object.entries(current).filter(([key, value]) => value && !(key === 'sort' && value === 'date') && !(key === 'viewed' && value === 'all')));
     const url = query.toString() ? `/?${query}` : '/';
     if (url !== location.pathname + location.search) history.pushState(null, '', url);
     window.scrollTo({ top: 0 });
@@ -136,6 +141,7 @@
     form.q.value = query.get('q') || '';
     form.category.value = query.get('category') || '';
     form.sort.value = query.get('sort') || 'date';
+    form.viewed.value = query.get('viewed') || 'all';
     load(true);
   }
 
@@ -145,6 +151,12 @@
   form.q.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, SEARCH_DELAY_MS); });
   form.category.addEventListener('change', applyFilters);
   form.sort.addEventListener('change', applyFilters);
+  form.viewed.addEventListener('change', applyFilters);
+  // Coming Back from an article shows an old copy of this page: either the whole page kept in memory
+  // (pageshow.persisted) or the cached HTML, which browsers reuse for history navigation even with
+  // no-cache. Reload the feed so the article just read is marked (or leaves "Not viewed yet").
+  window.addEventListener('pageshow', event => { if (event.persisted) load(true); });
+  if (window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward') load(true);
 
   if (!state.cursor && state.seen.size) setStatus('You have reached the end of the feed.');
   if ('IntersectionObserver' in window) {

@@ -21,18 +21,22 @@
           <select class="field" id="feed-sort" name="sort">
             <% const sortLabels = { date: 'Newest first', popular: 'Most popular' }; sorts.forEach(name => { %><option value="<%= name %>"<%= name === filters.sort ? ' selected' : '' %>><%= sortLabels[name] || name %></option><% }) %>
           </select></div>
+        <div class="control"><label class="field-label" for="feed-viewed">Show</label>
+          <select class="field" id="feed-viewed" name="viewed">
+            <% const viewedLabels = { all: 'All articles', unviewed: 'Not viewed yet', viewed: 'Already viewed' }; viewedFilters.forEach(name => { %><option value="<%= name %>"<%= name === filters.viewed ? ' selected' : '' %>><%= viewedLabels[name] || name %></option><% }) %>
+          </select></div>
         <button class="primary-button" id="feed-apply" type="submit">Apply</button>
       </form>
       <p class="feed-status" id="feed-status" role="status" aria-live="polite"></p>
       <section class="article-list" id="feed" aria-label="Articles" data-next-cursor="<%= nextCursor || '' %>">
         <% if (!articles.length) { %>
-          <div class="empty-state"><h2><%= filters.q || filters.category ? 'No matching articles' : 'No articles yet' %></h2><p><%= filters.q || filters.category ? 'Try another search or category.' : 'Published stories will appear here.' %></p></div>
+          <div class="empty-state"><h2><%= filters.q || filters.category || filters.viewed !== 'all' ? 'No matching articles' : 'No articles yet' %></h2><p><%= filters.q || filters.category || filters.viewed !== 'all' ? 'Try another search, category or view filter.' : 'Published stories will appear here.' %></p></div>
         <% } else { articles.forEach(article => { %>
           <%- include('partials/articleCard', { article }) %>
         <% }) } %>
       </section>
       <div id="feed-sentinel" aria-hidden="true"></div>
-      <% if (hasMore) { %><a class="more-link" id="feed-more" href="/?<%= new URLSearchParams({ q: filters.q, category: filters.category, sort: filters.sort, cursor: nextCursor }) %>">More articles</a><% } %>
+      <% if (hasMore) { %><a class="more-link" id="feed-more" href="/?<%= new URLSearchParams({ q: filters.q, category: filters.category, sort: filters.sort, viewed: filters.viewed, cursor: nextCursor }) %>">More articles</a><% } %>
     </main>
     <%- include('partials/sidebar') %>
   </div>

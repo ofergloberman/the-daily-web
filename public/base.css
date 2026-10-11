@@ -61,6 +61,7 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .card-image { flex: 0 0 220px; width: 220px; aspect-ratio: 3 / 2; object-fit: cover; background: var(--line); }
 .card-body { flex: 1 1 0; min-width: 0; }
 .card-category { margin: 0 0 .35rem; color: var(--blue-dark); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.viewed-badge { margin-left: .4rem; padding: .05rem .45rem; border-radius: 99px; background: #e7edf2; color: #344e63; font-size: .72rem; letter-spacing: 0; text-transform: none; }
 .card-title { margin: 0; font-size: 1.4rem; line-height: 1.25; }
 .card-title a { color: var(--ink); text-decoration: none; }
 .card-title a:hover { text-decoration: underline; }

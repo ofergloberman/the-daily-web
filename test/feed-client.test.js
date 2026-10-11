@@ -28,12 +28,12 @@ function node(tag = 'div') {
   return el;
 }
 
-function page({ cursor = 'cursor-1', fetch }) {
+function page({ cursor = 'cursor-1', fetch, navigation = 'navigate' }) {
   const feed = node('section');
   feed.dataset.nextCursor = cursor;
   const form = node('form');
-  form.q = node('input'); form.category = node('select'); form.sort = node('select');
-  form.sort.value = 'date';
+  form.q = node('input'); form.category = node('select'); form.sort = node('select'); form.viewed = node('select');
+  form.sort.value = 'date'; form.viewed.value = 'all';
   const els = { 'feed-controls': form, feed, 'feed-sentinel': node(), 'feed-status': node('p'), 'feed-apply': node('button'), 'feed-more': null };
   let observer;
   const history = { entries: [], pushState(_s, _t, url) { this.entries.push(url); context.location.search = url.slice(1); } };
@@ -43,7 +43,8 @@ function page({ cursor = 'cursor-1', fetch }) {
     FormData: class { constructor(f) { this.f = f; } get(name) { return this.f[name].value; } },
     IntersectionObserver: class { constructor(callback) { observer = () => callback([{ isIntersecting: true }]); } observe() {} },
     AbortController, URLSearchParams, Intl, setTimeout, clearTimeout,
-    scrollTo() {}, addEventListener() {}
+    scrollTo() {}, addEventListener() {},
+    performance: { getEntriesByType: () => [{ type: navigation }] }
   };
   context.window = context;
   vm.runInNewContext(script, context);
@@ -103,4 +104,16 @@ test('no duplicate request while loading, and no duplicate cards across pages', 
   for (let i = 0; i < 5; i++) await flush();
   assert.deepEqual(view.feed.children.map(card => card.dataset.id), ['a', 'b', 'c']);
   assert.match(view.status.textContent, /reached the end/);
+});
+
+test('returning with Back reloads the first page so viewed state is current', async () => {
+  const calls = [];
+  page({ cursor: 'cursor-1', navigation: 'back_forward', fetch: async url => { calls.push(url); return ok([article('x')]); } });
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.doesNotMatch(calls[0], /cursor=/, 'a fresh first page, not the next batch');
+  const fresh = [];
+  page({ fetch: async url => { fresh.push(url); return ok([]); } });
+  await flush();
+  assert.equal(fresh.length, 0, 'a normal visit uses the server-rendered page as is');
 });
