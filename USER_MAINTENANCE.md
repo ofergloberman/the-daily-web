@@ -1,0 +1,17 @@
+# User maintenance contract
+
+Status: proposed policy implemented on `dev1/user-maintenance-csrf`; D2/D4 human review and agreement are pending. This document records implementation decisions, not an assertion that teammates have approved them. Based on PROJECT_REQUIREMENTS sections 6.4, 14, 15 and 16.
+
+Accounts are maintained only by a trusted local operator with database access, through a CLI. There is no public registration or administration route. Guests stay anonymous. Creation and role changes accept only `reporter` or `editor`.
+
+Supported operations: create; read by exact ID or normalized username; list/search by username with default limit 20, maximum 100 and offset at most 10000; update username, displayName or role; reset password; delete. Reject unknown fields and ambiguous selectors. Usernames are trimmed and lowercased, nonempty, at most 50 characters without whitespace/control characters. Display names are trimmed, nonempty, at most 100 characters without control characters. Passwords are 8–128 characters, use existing `User.setPassword`, and are privately prompted twice on a terminal. Passwords are never command arguments, environment variables, logs or output.
+
+Read/list/write output is an explicit allowlist: id, username, displayName, role, createdAt and updatedAt. Never return password hashes, raw passwords, sessions or tokens. Errors identify invalid input, duplicate usernames, missing users, reference blockers and database failure without printing database details or supplied secrets.
+
+Password resets, actual role changes and successful deletion revoke **all** sessions of the user. Account change and session deletion commit in one MongoDB transaction or both roll back. Name/username edits preserve sessions; future requests load the current user. Ordinary restarts preserve sessions. Already-running requests cannot be recalled.
+
+Deletion rejects any reference in `Article.author` (any status and either version), `Comment.author`, or `PublicationEvent.editor`. The error lists blocking reference categories. Guest comments have null authors and do not block. Do not cascade, anonymize, reassign authors, erase publication history or alter snapshots. Existing comment display names are historical snapshots and do not change with account name edits. Role changes preserve all references, content and publication events; a Reporter changed to Editor loses Reporter routes, so coordinate ownership/work before changing roles. No special last-Editor exception is required: a local operator can create an Editor.
+
+**Offline write precondition:** stop every application process, other maintenance command and seed/import writer before create/update/reset/delete; restart after completion. The CLI requires `--offline` to acknowledge this. Read/list can run online. Transactions alone do not prevent concurrent inserts of references or login sessions because MongoDB has no foreign-key locking. D2/D4 must preserve this precondition or add shared locking to every reference writer before enabling online account maintenance. New User reference fields must be added to deletion blockers and lifecycle tests before use.
+
+Review checklist for D2/D4: confirm the three reference fields and reject-deletion policy, historical display-name behavior, offline write precondition, role-change effects, and the CSRF contract in CSRF.md. No teammate messaging or approval is assumed.
