@@ -10,9 +10,11 @@
   const SEARCH_DELAY_MS = 300;
   const PRELOAD_PX = 600;
   const dateFormat = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Jerusalem' });
-  const state = { cursor: feed.dataset.nextCursor || null, loading: false, generation: 0, controller: null, seen: new Set() };
+  // failed stops automatic loading after an error until the reader retries or changes the filters.
+  const state = { cursor: feed.dataset.nextCursor || null, loading: false, failed: false, generation: 0, controller: null, seen: new Set() };
   feed.querySelectorAll('.article-card').forEach(card => state.seen.add(card.dataset.id));
 
+  status.tabIndex = -1; // Focus target after "Try again" removes its own button.
   document.getElementById('feed-apply').hidden = true;
   const moreLink = document.getElementById('feed-more');
   if (moreLink) moreLink.hidden = 'IntersectionObserver' in window;
@@ -28,7 +30,7 @@
     if (retry) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'text-button'; button.textContent = 'Try again';
-      button.addEventListener('click', retry);
+      button.addEventListener('click', () => { state.failed = false; status.focus(); retry(); });
       status.append(' ', button);
     }
   }
@@ -74,7 +76,8 @@
   }
 
   async function load(reset) {
-    if (!reset && (state.loading || !state.cursor)) return;
+    if (!reset && (state.loading || state.failed || !state.cursor)) return;
+    state.failed = false;
     if (reset) {
       state.controller?.abort();
       state.cursor = null;
@@ -105,31 +108,45 @@
     } catch (error) {
       if (error.name === 'AbortError' || generation !== state.generation) return;
       if (reset) { feed.replaceChildren(); state.seen.clear(); } // Never show old results under new filters.
+      state.failed = true;
       setStatus('Could not load articles.', () => load(reset));
     } finally {
       if (generation === state.generation) {
         state.loading = false;
         feed.removeAttribute('aria-busy');
         if (moreLink && !state.cursor) moreLink.remove();
-        if (state.cursor && sentinel.getBoundingClientRect().top < innerHeight + PRELOAD_PX) load(false);
+        if (state.cursor && !state.failed && sentinel.getBoundingClientRect().top < innerHeight + PRELOAD_PX) load(false);
       }
     }
   }
 
+  // Each applied filter gets its own history entry, so Back returns to the previous results.
   function applyFilters() {
+    clearTimeout(searchTimer);
     const current = params();
     const query = new URLSearchParams(Object.entries(current).filter(([key, value]) => value && !(key === 'sort' && value === 'date')));
-    history.replaceState(null, '', query.toString() ? `/?${query}` : '/');
+    const url = query.toString() ? `/?${query}` : '/';
+    if (url !== location.pathname + location.search) history.pushState(null, '', url);
     window.scrollTo({ top: 0 });
     load(true);
   }
 
+  function restoreFromUrl() {
+    const query = new URLSearchParams(location.search);
+    form.q.value = query.get('q') || '';
+    form.category.value = query.get('category') || '';
+    form.sort.value = query.get('sort') || 'date';
+    load(true);
+  }
+
   let searchTimer;
-  form.addEventListener('submit', event => { event.preventDefault(); clearTimeout(searchTimer); applyFilters(); });
+  form.addEventListener('submit', event => { event.preventDefault(); applyFilters(); });
+  window.addEventListener('popstate', restoreFromUrl);
   form.q.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, SEARCH_DELAY_MS); });
   form.category.addEventListener('change', applyFilters);
   form.sort.addEventListener('change', applyFilters);
 
+  if (!state.cursor && state.seen.size) setStatus('You have reached the end of the feed.');
   if ('IntersectionObserver' in window) {
     new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) load(false); }, { rootMargin: `0px 0px ${PRELOAD_PX}px 0px` }).observe(sentinel);
   } else if (moreLink) {

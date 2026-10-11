@@ -14,6 +14,7 @@
         <div class="control"><label class="field-label" for="feed-category">Category</label>
           <select class="field" id="feed-category" name="category">
             <option value="">All categories</option>
+            <% if (filters.category && !categories.includes(filters.category)) { %><option value="<%= filters.category %>" selected><%= filters.category %></option><% } %>
             <% categories.forEach(name => { %><option value="<%= name %>"<%= name === filters.category ? ' selected' : '' %>><%= name %></option><% }) %>
           </select></div>
         <div class="control"><label class="field-label" for="feed-sort">Sort by</label>

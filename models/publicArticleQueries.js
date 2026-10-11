@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Article = require('./Article');
+require('./User'); // populate('author') needs the User model registered, even outside the app.
 
 // Public reads see only the approved snapshot. Never select draft or editorNote here.
 const PUBLIC_FIELDS = 'published publishedAt lastPublishedAt author';
@@ -7,6 +8,10 @@ const CARD_FIELDS = 'published.title published.summary published.category publis
 const PUBLISHED = { published: { $ne: null } };
 
 // Keyset ordering per sort. _id breaks ties so every article has exactly one position.
+// totalViews can change while a reader scrolls the popular feed: an article that moves above the
+// cursor is skipped for that session, one that moves below it can repeat (feed.js drops repeats by id).
+// Articles must have totalViews set (schema default 0); a document missing the field would fall out of
+// the popular keyset once the cursor reaches 0.
 const SORTS = {
   date: { field: 'publishedAt', order: { publishedAt: -1, _id: -1 } },
   popular: { field: 'totalViews', order: { totalViews: -1, _id: -1 } }
