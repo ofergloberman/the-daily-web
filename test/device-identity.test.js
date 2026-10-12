@@ -66,13 +66,17 @@ test('cookie attributes persist for one year and are Secure only in production',
 test('application mounts device identity before homepage, article, and comment handlers', async t => {
   restoreEnvironmentAfter(t);
   process.env.NODE_ENV = 'production';
+  const previousOrigin = process.env.APP_ORIGIN;
+  t.after(() => { if (previousOrigin === undefined) delete process.env.APP_ORIGIN; else process.env.APP_ORIGIN = previousOrigin; });
   mockEmptyFeed(t);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  // Cookie attributes are tested in production; expected origin must use HTTPS.
+  process.env.APP_ORIGIN = 'https://news.example.test';
   for (const [path, method, status] of [['/', 'GET', 200], ['/articles/invalid', 'GET', 404], ['/comments', 'POST', 400]]) {
-    const response = await fetch(base + path, { method });
+    const response = await fetch(base + path, { method, headers: { Origin: process.env.APP_ORIGIN } });
     assert.equal(response.status, status);
     const cookie = response.headers.getSetCookie().find(value => value.startsWith('wd_device='));
     assert.ok(cookie, path);
@@ -82,7 +86,7 @@ test('application mounts device identity before homepage, article, and comment h
     }
     const expires = cookie.split('; ').find(value => value.startsWith('Expires=')).slice(8);
     assert.ok(Math.abs(Date.parse(expires) - Date.now() - 31536000000) < 5000);
-    const reused = await fetch(base + path, { method, headers: { Cookie: cookie.split(';')[0] } });
+    const reused = await fetch(base + path, { method, headers: { Origin: process.env.APP_ORIGIN, Cookie: cookie.split(';')[0] } });
     assert.equal(reused.headers.getSetCookie().some(value => value.startsWith('wd_device=')), false);
   }
 });
