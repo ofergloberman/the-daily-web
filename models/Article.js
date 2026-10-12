@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ARTICLE_STATUSES } = require('../config/constants');
+const { ARTICLE_STATUSES, EDITOR_NOTE_MAX_LENGTH } = require('../config/constants');
 
 // Draft fields may be empty during autosave. Validate completeness on submission.
 const contentSchema = new mongoose.Schema({
@@ -21,7 +21,7 @@ const articleSchema = new mongoose.Schema({
   // Public readers use this approved snapshot, even while draft changes.
   published: { type: contentSchema, default: null },
   status: { type: String, enum: Object.values(ARTICLE_STATUSES), default: ARTICLE_STATUSES.DRAFT, required: true },
-  editorNote: { type: String, trim: true, maxlength: 2000, default: '' },
+  editorNote: { type: String, trim: true, maxlength: EDITOR_NOTE_MAX_LENGTH, default: '' },
   publishedAt: { type: Date, default: null },
   lastPublishedAt: { type: Date, default: null },
   // Identifies the exact PublicationEvent whose content is currently live, so a

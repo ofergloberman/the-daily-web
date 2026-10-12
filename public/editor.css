@@ -33,6 +33,23 @@
 .compare-empty { margin: .3rem 0 0; color: var(--muted); font-style: italic; }
 .compare-image { display: block; max-height: 14rem; margin-top: .75rem; object-fit: cover; }
 
+/* Editor actions on the review page */
+.review-actions { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--line); background: var(--white); }
+.review-actions h2 { margin: 0 0 1rem; font-size: 1.2rem; }
+.action-group { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.action-row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .75rem; }
+.action-hint { margin: 0; color: var(--muted); font-size: .9rem; }
+.review-actions .field { width: 100%; }
+.edit-panel summary { cursor: pointer; font-weight: 700; }
+.edit-form { display: flex; flex-direction: column; gap: .4rem; margin-top: 1rem; }
+.edit-form .field-label { margin-top: .6rem; }
+#action-status { margin: 1rem 0 0; }
+.secondary-button, .danger-button { border: 1px solid var(--blue-dark); border-radius: .25rem; padding: .75rem 1.1rem; background: var(--white); color: var(--blue-dark); font-weight: 700; cursor: pointer; }
+.secondary-button:hover { background: var(--pale); }
+.danger-button { border-color: var(--error); color: var(--error); }
+.danger-button:hover { background: #f9e8e6; }
+.secondary-button:disabled, .danger-button:disabled { opacity: .6; cursor: not-allowed; }
+
 @media (max-width: 600px) {
   .editor-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
   .editor-row-status { align-items: flex-start; }

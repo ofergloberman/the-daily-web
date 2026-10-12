@@ -48,17 +48,6 @@ async function findLatestPublicationId(articleId) {
   return event?._id ?? null;
 }
 
-// Pass the surrounding transaction session so the event commits together with the new public snapshot.
-async function createPublicationEvent({ article, editor, kind, publishedAt = new Date() }, session) {
-  const [event] = await PublicationEvent.create([{ article, editor, kind, publishedAt }], { session });
-  return event;
-}
-
-async function deleteArticleAnalytics(articleId, session) {
-  await ViewStatistic.deleteMany({ article: articleId }, { session });
-  await PublicationEvent.deleteMany({ article: articleId }, { session });
-}
-
 // Fills buckets without visits so quiet periods appear as zero instead of being skipped.
 function fillSeries(viewsByTime, from, to, unit) {
   const points = [];
@@ -112,7 +101,5 @@ module.exports = {
   fillSeries,
   recordVisit,
   findLatestPublicationId,
-  createPublicationEvent,
-  deleteArticleAnalytics,
   getViewSeries
 };

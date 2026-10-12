@@ -1,0 +1,36 @@
+<section class="review-actions" aria-labelledby="actions-title">
+  <h2 id="actions-title">Editor actions</h2>
+  <% if (canDecide) { %>
+    <div class="action-row">
+      <button class="primary-button" type="button" data-action="approve">Approve and publish</button>
+    </div>
+    <div class="action-group">
+      <label class="field-label" for="return-note">Correction note (required to return the article)</label>
+      <textarea class="field" id="return-note" rows="3" maxlength="<%= noteMaxLength %>"></textarea>
+      <div class="action-row"><button class="secondary-button" type="button" data-action="return">Return for corrections</button></div>
+    </div>
+  <% } else { %>
+    <p class="action-hint">Approve and return are available while an article is pending approval.</p>
+  <% } %>
+
+  <details class="action-group edit-panel">
+    <summary>Edit the working copy</summary>
+    <form id="edit-form" class="edit-form" autocomplete="off">
+      <label class="field-label" for="edit-title">Title</label>
+      <input class="field" id="edit-title" name="title" type="text" maxlength="<%= limits.title %>" value="<%= article.draft?.title %>">
+      <label class="field-label" for="edit-summary">Summary</label>
+      <textarea class="field" id="edit-summary" name="summary" rows="3" maxlength="<%= limits.summary %>"><%= article.draft?.summary %></textarea>
+      <label class="field-label" for="edit-category">Category</label>
+      <input class="field" id="edit-category" name="category" type="text" maxlength="<%= limits.category %>" value="<%= article.draft?.category %>">
+      <label class="field-label" for="edit-imageUrl">Main image URL</label>
+      <input class="field" id="edit-imageUrl" name="imageUrl" type="text" maxlength="<%= limits.imageUrl %>" value="<%= article.draft?.imageUrl %>">
+      <label class="field-label" for="edit-body">Article text</label>
+      <textarea class="field" id="edit-body" name="body" rows="12" maxlength="<%= limits.body %>"><%= article.draft?.body %></textarea>
+      <div class="action-row"><button class="secondary-button" type="submit">Save changes</button></div>
+    </form>
+  </details>
+
+  <div class="action-group">
+    <button class="danger-button" type="button" data-action="delete">Delete article</button>
+  </div>
+</section>

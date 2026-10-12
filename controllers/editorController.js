@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ARTICLE_STATUSES } = require('../config/constants');
+const { ARTICLE_STATUSES, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH } = require('../config/constants');
 const { listForEditor, findForReview } = require('../models/editorArticleQueries');
 const { parsePage } = require('../helpers/pagination');
 
@@ -60,7 +60,9 @@ async function reviewArticle(req, res, next) {
     res.render('editor/review', {
       user: req.user, title: 'Review article', styles: ['/editor.css'],
       article, fields: compareContent(article), isHttpUrl,
-      statusLabel: STATUS_LABELS[article.status], draftHeading: DRAFT_HEADINGS[article.status]
+      statusLabel: STATUS_LABELS[article.status], draftHeading: DRAFT_HEADINGS[article.status],
+      canDecide: article.status === ARTICLE_STATUSES.PENDING,
+      limits: DRAFT_FIELD_LIMITS, noteMaxLength: EDITOR_NOTE_MAX_LENGTH
     });
   } catch (error) { next(error); }
 }
