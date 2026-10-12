@@ -7,6 +7,8 @@ const { deviceIdentity } = require('./middleware/deviceIdentity');
 const { showHome } = require('./controllers/publicArticleController');
 const { formatDate } = require('./helpers/dates');
 const { applicationOrigin, csrfProtection } = require('./middleware/csrf');
+const { logEvent, requestContext } = require('./helpers/logging');
+const { errorBody } = require('./helpers/errors');
 
 const app = express();
 app.disable('x-powered-by');
@@ -31,12 +33,19 @@ app.use('/editor', requireEditor, require('./routes/editor'));
 app.use('/analytics', requireEditor, require('./routes/analytics'));
 app.use('/articles', require('./routes/articles'));
 app.use('/comments', require('./routes/comments'));
-app.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
-app.use((error, _req, res, _next) => {
-  if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'INVALID_JSON' });
-  if (error.type === 'entity.too.large') return res.status(413).json({ error: 'PAYLOAD_TOO_LARGE' });
-  console.error('Request failed:', error.name);
-  res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+app.use((_req, res) => res.status(404).json(errorBody('NOT_FOUND')));
+app.use((error, req, res, _next) => {
+  const status = error.type === 'entity.parse.failed' ? 400 : error.type === 'entity.too.large' ? 413 : 500;
+  const code = status === 400 ? 'INVALID_JSON' : status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_SERVER_ERROR';
+  logEvent(status === 500 ? 'error' : 'warn', status === 500 ? 'request.failed' : 'request.rejected',
+    { ...requestContext(req), outcome: status === 500 ? 'failure' : 'rejected', status, reason: code, errorType: error.name });
+  // A partial response cannot be replaced. Close it without handing the raw
+  // exception to Express's default handler, which can print sensitive details.
+  if (res.headersSent) return res.destroy();
+  if (req.path === '/auth/login' && req.is('application/x-www-form-urlencoded')) {
+    return res.status(status).render('login', { error: errorBody(code).message });
+  }
+  res.status(status).json(errorBody(code));
 });
 
 async function start() {

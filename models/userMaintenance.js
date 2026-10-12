@@ -4,6 +4,7 @@ const Session = require('./Session');
 const Article = require('./Article');
 const Comment = require('./Comment');
 const PublicationEvent = require('./PublicationEvent');
+const { logEvent } = require('../helpers/logging');
 
 class MaintenanceError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -114,4 +115,24 @@ async function updateUser(input, changes) { return changeUser(input, profile(cha
 async function resetPassword(input, password) { passwordInput(password); return changeUser(input, {}, password); }
 async function deleteUser(input) { return changeUser(input, {}, undefined, true); }
 
-module.exports = { MaintenanceError, createUser, readUser, listUsers, updateUser, resetPassword, deleteUser };
+// Log at the operation boundary, after a transaction has committed. Transaction
+// callbacks can be retried and must not emit premature or duplicate success logs.
+function audited(operation, callback, writes = true) {
+  return async (...args) => {
+    try {
+      const result = await callback(...args);
+      if (writes) logEvent('info', `account.${operation}`, { outcome: 'success', userId: result.id, scope: 'maintenance' });
+      return result;
+    } catch (error) {
+      const reason = error instanceof MaintenanceError ? error.code : 'DATABASE_FAILURE';
+      logEvent(reason === 'DATABASE_FAILURE' ? 'error' : 'warn', `account.${operation}`,
+        { outcome: reason === 'DATABASE_FAILURE' ? 'failure' : 'rejected', reason, scope: 'maintenance' });
+      throw error;
+    }
+  };
+}
+
+module.exports = { MaintenanceError,
+  createUser: audited('create', createUser), readUser: audited('read', readUser, false),
+  listUsers: audited('list', listUsers, false), updateUser: audited('update', updateUser),
+  resetPassword: audited('reset-password', resetPassword), deleteUser: audited('delete', deleteUser) };

@@ -1,3 +1,4 @@
+const { logEvent, requestContext } = require('../helpers/logging');
 // Origin is supplied by browsers, never inferred from Host or proxy headers.
 function applicationOrigin() {
   const configured = process.env.APP_ORIGIN;
@@ -31,11 +32,11 @@ function csrfProtection(req, res, next) {
   let expected;
   try { expected = applicationOrigin(); }
   catch {
-    console.error('CSRF configuration invalid.');
+    logEvent('error', 'csrf.unavailable', { ...requestContext(req), outcome: 'failure', reason: 'CSRF_UNAVAILABLE', status: 503 });
     return res.status(503).json({ error: 'CSRF_UNAVAILABLE', message: 'Request protection is not configured.' });
   }
   if (req.headers['sec-fetch-site'] === 'cross-site' || requestOrigin(req.headers) !== expected) {
-    console.warn('CSRF request rejected:', req.method);
+    logEvent('warn', 'csrf.rejected', { ...requestContext(req), outcome: 'rejected', reason: 'CSRF_REJECTED', status: 403 });
     return res.status(403).json({ error: 'CSRF_REJECTED', message: 'Open this site directly and retry your request.' });
   }
   return next();

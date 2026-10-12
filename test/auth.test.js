@@ -35,6 +35,8 @@ test('passwords use salted, one-way hashes and never appear in JSON', async () =
 });
 
 test('login, role checks, restart continuity, and logout', async t => {
+  const logs = [];
+  for (const level of ['info', 'warn', 'error']) t.mock.method(console, level, line => logs.push(line));
   const reporter = new User({ _id: new mongoose.Types.ObjectId(), username: 'reporter', displayName: 'Reporter', role: 'reporter' });
   const editor = new User({ _id: new mongoose.Types.ObjectId(), username: 'editor', displayName: 'Editor', role: 'editor' });
   await reporter.setPassword('correct-password');
@@ -113,4 +115,9 @@ test('login, role checks, restart continuity, and logout', async t => {
   const afterLogout = await fetch(running.base + '/auth', { headers: { Cookie: deviceCookie } });
   assert.equal(afterLogout.status, 200);
   assert.equal(getCookie(afterLogout, 'wd_device'), undefined);
+  const entries = logs.map(JSON.parse);
+  assert.ok(entries.some(entry => entry.event === 'auth.login' && entry.outcome === 'success'));
+  assert.ok(entries.some(entry => entry.event === 'auth.logout' && entry.outcome === 'success'));
+  assert.ok(entries.some(entry => entry.event === 'auth.rejected' && entry.endpoint === '/auth/me'));
+  for (const value of ['correct-password', 'editor-password', token]) assert.equal(logs.join('\n').includes(value), false);
 });

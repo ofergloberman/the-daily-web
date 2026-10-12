@@ -1,6 +1,8 @@
 const { createHash } = require('node:crypto');
 const Session = require('../models/Session');
 const { ROLES } = require('../config/constants');
+const { logEvent, requestContext } = require('../helpers/logging');
+const { errorBody } = require('../helpers/errors');
 
 const COOKIE_NAME = 'wd_session';
 
@@ -31,16 +33,21 @@ async function loadUser(req, res, next) {
 }
 
 function requireAuth(req, res, next) {
-  if (!req.user) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+  if (!req.user) return reject(req, res, 401, 'AUTH_REQUIRED');
   next();
 }
 
 function requireRole(role) {
   return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-    if (req.user.role !== role) return res.status(403).json({ error: 'FORBIDDEN' });
+    if (!req.user) return reject(req, res, 401, 'AUTH_REQUIRED');
+    if (req.user.role !== role) return reject(req, res, 403, 'FORBIDDEN');
     next();
   };
+}
+
+function reject(req, res, status, reason) {
+  logEvent('warn', 'auth.rejected', { ...requestContext(req), outcome: 'rejected', status, reason });
+  return res.status(status).json(errorBody(reason));
 }
 
 const requireReporter = requireRole(ROLES.REPORTER);

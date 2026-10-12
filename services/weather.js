@@ -1,3 +1,4 @@
+const { logEvent } = require('../helpers/logging');
 const MAX_AGE_MS = 15 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
 const BACKOFF_MS = 60 * 1000;
@@ -36,21 +37,30 @@ function createWeatherService({ env = process.env, fetchProvider = (...args) => 
   async function refresh() {
     const controller = new AbortController();
     let timer;
+    let reason = 'CONFIGURATION';
     try {
       const { location, url } = configuration();
+      reason = 'PROVIDER_NETWORK';
       // The deadline covers both the response headers and the JSON body.
       const timeout = new Promise((_, reject) => {
         timer = schedule(() => {
+          reason = 'TIMEOUT';
           controller.abort();
           reject(new Error('Weather timeout'));
         }, 5000);
       });
       const payload = await Promise.race([timeout, (async () => {
         const response = await fetchProvider(url, { signal: controller.signal });
-        if (!response.ok) throw new Error('Weather provider failure');
-        return response.json();
+        if (!response.ok) {
+          if (reason !== 'TIMEOUT') reason = 'PROVIDER_HTTP';
+          throw new Error('Weather provider failure');
+        }
+        // Do not let late completion overwrite the timeout classification.
+        try { return await response.json(); }
+        catch (error) { if (reason !== 'TIMEOUT') reason = 'PROVIDER_JSON'; throw error; }
       })()]);
       const fetchedAt = now();
+      reason = 'INVALID_OR_STALE_DATA';
       const current = payload?.current;
       const dataTime = current?.time * 1000;
       if (!Number.isSafeInteger(current?.time) || !Number.isFinite(dataTime)
@@ -67,7 +77,7 @@ function createWeatherService({ env = process.env, fetchProvider = (...args) => 
       retryAt = 0;
     } catch {
       retryAt = now() + BACKOFF_MS;
-      logger.warn('Weather refresh failed; retry delayed for one minute.');
+      logEvent('warn', 'weather.refresh', { outcome: 'failure', reason, scope: 'weather' }, logger);
     } finally {
       cancel(timer);
     }

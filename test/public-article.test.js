@@ -120,5 +120,7 @@ test('comment database errors reach the request error handler', async t => {
   t.after(() => new Promise(resolve => server.close(resolve)));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`);
   assert.equal(response.status, 500);
-  assert.deepEqual(await response.json(), { error: 'INTERNAL_SERVER_ERROR' });
+  const failure = await response.json();
+  assert.equal(failure.error, 'INTERNAL_SERVER_ERROR');
+  assert.match(failure.message, /try again later/);
 });

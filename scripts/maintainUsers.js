@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { connectDatabase } = require('../config/database');
 const operations = require('../models/userMaintenance');
 const { privatePassword } = require('./privatePassword');
+const { logEvent } = require('../helpers/logging');
 
 const usage = `Usage: npm run users -- <command> [options]
 Commands: create, read, list, update, reset-password, delete
@@ -43,8 +44,13 @@ async function main(args = process.argv.slice(2)) {
     if (Object.hasOwn(options, option)) changes[field] = options[option];
   }
   const password = ['create', 'reset-password'].includes(command) ? await privatePassword() : undefined;
-  await connectDatabase(process.env.MONGODB_URI);
-  await require('../models/User').init();
+  try {
+    await connectDatabase(process.env.MONGODB_URI);
+    await require('../models/User').init();
+  } catch (error) {
+    logEvent('error', `account.${command}`, { outcome: 'failure', reason: 'DATABASE_FAILURE', scope: 'maintenance' });
+    throw error;
+  }
   let result;
   switch (command) {
     case 'create': result = await operations.createUser({ username: options.username, ...changes }, password); break;
@@ -62,11 +68,21 @@ async function run(args) {
   try { await main(args); }
   catch (error) {
     // Database errors can contain connection credentials. Never print those messages.
+    const safeMessages = new Set([usage, 'Unknown or repeated option.\n' + usage,
+      'Missing option value.', 'Stop all application/seed writers, then pass --offline.',
+      'Password entry requires an interactive terminal.', 'Password entry cancelled.', 'Passwords do not match.']);
     console.error(error instanceof operations.MaintenanceError ? `${error.code}: ${error.message}` :
-      (/^(Usage:|Unknown or repeated|Missing option|Stop all|Password)/.test(error.message)
+      (safeMessages.has(error.message)
         ? error.message : 'Maintenance failed; check database configuration and availability.'));
     process.exitCode = 1;
-  } finally { await mongoose.disconnect(); }
+  } finally {
+    try { await mongoose.disconnect(); }
+    catch {
+      logEvent('error', 'request.failed', { outcome: 'failure', reason: 'DATABASE_FAILURE', scope: 'maintenance' });
+      console.error('Could not close the database connection cleanly.');
+      process.exitCode = 1;
+    }
+  }
 }
 if (require.main === module) run();
 module.exports = { parse, run };

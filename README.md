@@ -164,6 +164,9 @@ Login accepts a form or JSON body with `username` and `password`. JSON login res
 
 ## Tests
 
+Shared failure responses and safe operational event logging are documented in
+[README.error-handling.md](README.error-handling.md).
+
 ```powershell
 npm test
 ```

@@ -1,6 +1,14 @@
 const mongoose = require('mongoose');
 const Comment = require('../models/Comment');
 const comments = require('../services/comments');
+const { logEvent } = require('../helpers/logging');
+const { errorBody } = require('../helpers/errors');
+
+function reject(req, res, status, reason) {
+  logEvent('warn', 'comment.rejected', { outcome: 'rejected', reason, status,
+    method: req.method, actorId: req.user?.id, commentId: req.params?.id });
+  return res.status(status).json(errorBody(reason));
+}
 
 const PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -36,10 +44,10 @@ async function list(req, res, next) {
   const limit = req.query.limit === undefined ? PAGE_SIZE : Number(req.query.limit);
   const cursor = parseCursor(req.query.cursor);
   if (!validId(articleId) || !Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE || cursor === false) {
-    return res.status(400).json({ error: 'INVALID_COMMENT_QUERY' });
+    return reject(req, res, 400, 'INVALID_COMMENT_QUERY');
   }
   try {
-    if (!await comments.publishedArticleExists(articleId)) return res.status(404).json({ error: 'ARTICLE_NOT_FOUND' });
+    if (!await comments.publishedArticleExists(articleId)) return reject(req, res, 404, 'ARTICLE_NOT_FOUND');
     const query = { article: articleId };
     if (cursor) query.$or = [
       { createdAt: { $lt: cursor.at } },
@@ -55,17 +63,18 @@ async function create(req, res, next) {
   const { articleId } = req.body || {};
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
       Object.keys(req.body).some(key => !['articleId', 'displayName', 'body'].includes(key))) {
-    return res.status(400).json({ error: 'INVALID_COMMENT' });
+    return reject(req, res, 400, 'INVALID_COMMENT');
   }
   const body = trimmed(req.body?.body, 2000);
   const displayName = req.user ? trimmed(req.user.displayName, 100) : trimmed(req.body?.displayName, 100);
-  if (!validId(articleId) || !body || !displayName) return res.status(400).json({ error: 'INVALID_COMMENT' });
+  if (!validId(articleId) || !body || !displayName) return reject(req, res, 400, 'INVALID_COMMENT');
   try {
     const outcome = req.user
       ? await comments.createAuthenticatedComment({ articleId, body, user: req.user })
       : await comments.createGuestComment({ articleId, displayName, body, deviceId: req.deviceId });
-    if (outcome.kind === 'notFound') return res.status(404).json({ error: 'ARTICLE_NOT_FOUND' });
+    if (outcome.kind === 'notFound') return reject(req, res, 404, 'ARTICLE_NOT_FOUND');
     if (outcome.kind === 'limited') {
+      logEvent('warn', 'comment.rejected', { outcome: 'rejected', reason: 'COMMENT_RATE_LIMIT', status: 429, articleId });
       res.set('Retry-After', String(outcome.retryAfterSeconds));
       return res.status(429).json({
         error: 'COMMENT_RATE_LIMIT',
@@ -73,39 +82,44 @@ async function create(req, res, next) {
         retryAfterSeconds: outcome.retryAfterSeconds
       });
     }
-    console.info('Comment created:', outcome.comment.id);
+    logEvent('info', 'comment.create', { outcome: 'success', commentId: outcome.comment.id, articleId, actorId: req.user?.id });
     res.status(201).json({ comment: outcome.comment });
   } catch (error) {
-    if (error.name === 'ValidationError' || error.name === 'CastError') return res.status(400).json({ error: 'INVALID_COMMENT' });
+    if (error.name === 'ValidationError' || error.name === 'CastError') return reject(req, res, 400, 'INVALID_COMMENT');
     next(error);
   }
 }
 
 async function read(req, res, next) {
-  if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
+  if (!validId(req.params.id)) return reject(req, res, 400, 'INVALID_COMMENT_ID');
   try {
     const comment = await Comment.findById(req.params.id).lean();
-    if (!comment || !await comments.publishedArticleExists(comment.article)) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
+    if (!comment || !await comments.publishedArticleExists(comment.article)) return reject(req, res, 404, 'COMMENT_NOT_FOUND');
     res.json({ comment: comments.publicComment(comment) });
   } catch (error) { next(error); }
 }
 
 async function update(req, res, next) {
-  if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
+  if (!validId(req.params.id)) return reject(req, res, 400, 'INVALID_COMMENT_ID');
   const body = trimmed(req.body?.body, 2000);
-  if (!body || Object.keys(req.body).some(key => key !== 'body')) return res.status(400).json({ error: 'INVALID_COMMENT' });
+  if (!body || Object.keys(req.body).some(key => key !== 'body')) return reject(req, res, 400, 'INVALID_COMMENT');
   try {
     const comment = await Comment.findByIdAndUpdate(req.params.id, { $set: { body } }, { returnDocument: 'after', runValidators: true });
-    if (!comment) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
+    if (!comment) return reject(req, res, 404, 'COMMENT_NOT_FOUND');
+    logEvent('info', 'comment.update', { outcome: 'success', commentId: req.params.id, actorId: req.user?.id });
     res.json({ comment: comments.publicComment(comment) });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (error.name === 'ValidationError' || error.name === 'CastError') return reject(req, res, 400, 'INVALID_COMMENT');
+    next(error);
+  }
 }
 
 async function remove(req, res, next) {
-  if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
+  if (!validId(req.params.id)) return reject(req, res, 400, 'INVALID_COMMENT_ID');
   try {
     const deleted = await Comment.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
+    if (!deleted) return reject(req, res, 404, 'COMMENT_NOT_FOUND');
+    logEvent('info', 'comment.delete', { outcome: 'success', commentId: req.params.id, actorId: req.user?.id });
     res.status(204).end();
   } catch (error) { next(error); }
 }

@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Session = require('../models/Session');
 const { ROLES } = require('../config/constants');
 const { COOKIE_NAME, hashToken, readSessionToken } = require('../middleware/auth');
+const { logEvent } = require('../helpers/logging');
+const { errorBody } = require('../helpers/errors');
 
 const SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -24,13 +26,15 @@ async function login(req, res, next) {
     const { username, password } = req.body || {};
     const form = req.is('application/x-www-form-urlencoded');
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || username.length > 50 || !password) {
+      logEvent('warn', 'auth.login', { outcome: 'rejected', reason: 'INVALID_INPUT' });
       if (form) return res.status(400).render('login', { error: 'Enter a username and password.' });
-      return res.status(400).json({ error: 'INVALID_INPUT' });
+      return res.status(400).json(errorBody('INVALID_INPUT'));
     }
     const user = await User.findOne({ username: username.trim().toLowerCase() }).select('+passwordHash');
     if (!user || ![ROLES.REPORTER, ROLES.EDITOR].includes(user.role) || !(await user.verifyPassword(password))) {
+      logEvent('warn', 'auth.login', { outcome: 'rejected', reason: 'INVALID_CREDENTIALS' });
       if (form) return res.status(401).render('login', { error: 'Invalid username or password.' });
-      return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+      return res.status(401).json(errorBody('INVALID_CREDENTIALS'));
     }
 
     const oldToken = readSessionToken(req.headers.cookie);
@@ -41,7 +45,7 @@ async function login(req, res, next) {
       httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production',
       path: '/', maxAge: SESSION_AGE_MS
     });
-    console.info('User logged in:', user.id);
+    logEvent('info', 'auth.login', { outcome: 'success', userId: user.id });
     if (form) return res.redirect(303, destination(user));
     return res.json({ user: publicUser(user), redirectTo: destination(user) });
   } catch (error) { next(error); }
@@ -52,6 +56,7 @@ async function logout(req, res, next) {
     const token = readSessionToken(req.headers.cookie);
     if (token) await Session.deleteOne({ tokenHash: hashToken(token) });
     res.clearCookie(COOKIE_NAME, { path: '/', sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+    logEvent('info', 'auth.logout', { outcome: 'success', actorId: req.user?.id });
     if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, '/auth');
     return res.status(204).end();
   } catch (error) { next(error); }

@@ -94,10 +94,11 @@ test('POST appends only the returned comment as text and blocks duplicate in-fli
 });
 
 test('validation, 429, server and network errors retain input and existing list', async t => {
-  for (const status of [400, 429, 500, 'network']) {
+  for (const status of [400, 401, 403, 404, 429, 500, 'network', 'malformed']) {
     await t.test(String(status), async () => {
       const ui = browser(async () => {
         if (status === 'network') throw new Error('offline');
+        if (status === 'malformed') return { ok: true, json: async () => { throw new SyntaxError('broken'); } };
         return { ok: false, status, json: async () => ({ retryAfterSeconds: 12 }) };
       });
       await ui.submit();
@@ -106,7 +107,7 @@ test('validation, 429, server and network errors retain input and existing list'
       assert.equal(ui.list.children.length, 1);
       assert.equal(ui.list.children[0], ui.original);
       assert.equal(ui.button.disabled, false);
-      assert.match(ui.message.textContent, status === 429 ? /12 seconds/ : /Check|kept/);
+      assert.match(ui.message.textContent, status === 429 ? /12 seconds/ : /Check|kept|no longer available/);
     });
   }
 });

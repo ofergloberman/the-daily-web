@@ -66,6 +66,12 @@
               ? ` Please try again in ${Math.ceil(seconds)} seconds.` : ' Please try again shortly.'), true);
         } else if (response.status === 400) {
           announce('Check your name (1–100 characters) and comment (1–2,000 characters), then try again.', true);
+        } else if (response.status === 401) {
+          announce('Your session has ended. Your text has been kept; sign in before trying again.', true);
+        } else if (response.status === 403) {
+          announce(data.error === 'CSRF_REJECTED'
+            ? 'Open this site directly before trying again. Your text has been kept.'
+            : 'You do not have permission to post this comment. Your text has been kept.', true);
         } else if (response.status === 404) {
           announce('This article is no longer available for comments.', true);
         } else {

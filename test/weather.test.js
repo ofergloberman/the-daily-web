@@ -72,6 +72,7 @@ test('five-second timeout covers headers and body, aborts and backs off', async 
     assert.deepEqual(await service.getWeather(), unavailable);
     assert.equal(service.calls.length, 1);
     assert.equal(service.timers.size, 0);
+    assert.equal(JSON.parse(service.warnings[0]).reason, 'TIMEOUT');
   }
 });
 
@@ -87,8 +88,11 @@ test('late provider completion after a timeout cannot populate the cache', async
 });
 
 test('provider HTTP, network and JSON failures back off and recover at the boundary', async () => {
-  for (const fail of [() => ({ ok: false }), () => { throw new Error('network'); },
-    () => ({ ok: true, json: async () => { throw new SyntaxError('invalid JSON'); } })]) {
+  for (const [reason, fail] of [
+    ['PROVIDER_HTTP', () => ({ ok: false })],
+    ['PROVIDER_NETWORK', () => { throw new Error('private-token private-host'); }],
+    ['PROVIDER_JSON', () => ({ ok: true, json: async () => { throw new SyntaxError('private-password'); } })]
+  ]) {
     let failed = true;
     const service = setup(async () => failed ? fail() : { ok: true, json: async () => payload() });
     assert.deepEqual(await service.getWeather(), unavailable);
@@ -97,6 +101,8 @@ test('provider HTTP, network and JSON failures back off and recover at the bound
     await Promise.all(Array.from({ length: 100 }, () => service.getWeather()));
     assert.equal(service.calls.length, 1);
     assert.equal(service.warnings.length, 1);
+    assert.equal(JSON.parse(service.warnings[0]).reason, reason);
+    assert.doesNotMatch(service.warnings[0], /private-/);
     service.setTime(START + MINUTE);
     assert.equal((await service.getWeather()).status, 'available');
     assert.equal(service.calls.length, 2);
@@ -118,6 +124,7 @@ test('malformed, old and future provider data are rejected', async () => {
   for (const data of invalid) {
     const service = setup(async () => ({ ok: true, json: async () => data }));
     assert.deepEqual(await service.getWeather(), unavailable);
+    assert.equal(JSON.parse(service.warnings[0]).reason, 'INVALID_OR_STALE_DATA');
     await service.getWeather();
     assert.equal(service.calls.length, 1);
   }
@@ -164,6 +171,7 @@ test('missing or invalid location never contacts provider', async () => {
     const service = setup(undefined, config);
     assert.deepEqual(await service.getWeather(), unavailable);
     assert.equal(service.calls.length, 0);
+    assert.equal(JSON.parse(service.warnings[0]).reason, 'CONFIGURATION');
   }
 });
 
