@@ -25,11 +25,14 @@ async function startServer(t) {
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
-  return (method, path, token, body) => fetch(base + path, {
+  process.env.APP_ORIGIN = base;
+  const send = (method, path, token, body) => fetch(base + path, {
     method,
-    headers: { ...(token && { Cookie: `wd_session=${token}` }), ...(body !== undefined && { 'Content-Type': 'application/json' }) },
+    headers: { Origin: base, ...(token && { Cookie: `wd_session=${token}` }), ...(body !== undefined && { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
+  send.base = base;
+  return send;
 }
 
 function mockWorkflow(t, name, impl) {
@@ -52,6 +55,23 @@ test('every Editor action rejects guests and Reporters before reaching the workf
     assert.equal(guest.status, 401, `${action.name} as guest`);
     const reporter = await send(action.method, action.path(id), tokens.reporter, action.body);
     assert.equal(reporter.status, 403, `${action.name} as reporter`);
+  }
+  assert.ok(spies.every(spy => spy.mock.callCount() === 0));
+});
+
+test('Editor actions are rejected without a same-origin Origin header', async t => {
+  const send = await startServer(t);
+  t.mock.method(console, 'warn', () => {});
+  const spies = ACTIONS.map(action => mockWorkflow(t, action.name, async () => { throw new Error('must not run'); }));
+  const id = new ObjectId();
+  for (const action of ACTIONS) {
+    for (const origin of [undefined, 'https://evil.example']) {
+      const response = await fetch(send.base + action.path(id), {
+        method: action.method, headers: { Cookie: `wd_session=${tokens.editor}`, ...(origin && { Origin: origin }) }
+      });
+      assert.equal(response.status, 403, `${action.name} with origin ${origin}`);
+      assert.equal((await response.json()).error, 'CSRF_REJECTED');
+    }
   }
   assert.ok(spies.every(spy => spy.mock.callCount() === 0));
 });
