@@ -14,7 +14,9 @@ function getCookie(response, name) {
 async function listen() {
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
-  return { server, base: `http://127.0.0.1:${server.address().port}` };
+  const base = `http://127.0.0.1:${server.address().port}`;
+  process.env.APP_ORIGIN = base;
+  return { server, base };
 }
 
 test('passwords use salted, one-way hashes and never appear in JSON', async () => {
@@ -55,7 +57,7 @@ test('login, role checks, restart continuity, and logout', async t => {
   let running = await listen();
   t.after(async () => { if (running.server.listening) await new Promise(resolve => running.server.close(resolve)); });
   const post = (url, body, cookie) => fetch(running.base + url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body)
+    method: 'POST', headers: { Origin: running.base, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body)
   });
 
   assert.equal((await fetch(running.base + '/auth/me')).status, 401);
@@ -81,7 +83,7 @@ test('login, role checks, restart continuity, and logout', async t => {
   running = await listen();
   assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: cookie } })).status, 200);
   assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: 'wd_session=invalid' } })).status, 401);
-  const logout = await fetch(running.base + '/auth/logout', { method: 'POST', headers: { Cookie: cookie } });
+  const logout = await fetch(running.base + '/auth/logout', { method: 'POST', headers: { Origin: running.base, Cookie: cookie } });
   assert.equal(logout.status, 204);
   assert.equal(sessions.size, 0);
   assert.equal((await fetch(running.base + '/auth/me', { headers: { Cookie: cookie } })).status, 401);

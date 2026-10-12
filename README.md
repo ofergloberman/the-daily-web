@@ -13,6 +13,8 @@ Copy-Item .env.example .env
 
 Set `MONGODB_URI` in `.env` to your transaction-capable database connection string. The example file uses a local replica set on port 27018. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
 
+Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer; requests missing both are rejected. See [Shared CSRF integration contract](CSRF.md) for forms, AJAX, proxy configuration and D2/D4 review details.
+
 ```powershell
 npm run dev
 # Or run without watching for file changes:
@@ -23,16 +25,15 @@ After the database connection and transaction check succeed, the server listens 
 
 ### Create the first account
 
-Run this in PowerShell after configuring MongoDB. The password is read privately and passed to the local process through a temporary environment variable; it is never written to the repository.
+Stop application and seed writers, then run this in an interactive terminal after configuring MongoDB. The CLI privately prompts for the password and confirmation.
 
 ```powershell
-$secret = Read-Host 'New password (8-128 characters)' -AsSecureString
-$env:NEW_USER_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
-try { npm run create-user -- reporter1 'Reporter One' reporter }
-finally { Remove-Item Env:NEW_USER_PASSWORD }
+npm run create-user -- reporter1 'Reporter One' reporter --offline
 ```
 
 Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, where they browse all articles, review submissions, and open `/analytics`. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
+
+Full local account CRUD is available through `npm run users -- <command>`. See [User maintenance rules and commands](USER_MAINTENANCE.md) for deletion blockers, offline writes, session revocation, safe output and tests. `NEW_USER_PASSWORD` is no longer read.
 
 ## Project structure
 
