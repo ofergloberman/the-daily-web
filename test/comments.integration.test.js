@@ -15,15 +15,21 @@ const { createGuestComment } = require('../services/comments');
 const uri = process.env.COMMENTS_TEST_MONGODB_URI;
 
 test('comments API and atomic limiter against real MongoDB', { skip: !uri && 'Set COMMENTS_TEST_MONGODB_URI to a transaction-capable test database.' }, async t => {
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
-  const databaseName = mongoose.connection.name;
-  assert.match(databaseName, /^the_daily_web_comments_test_[a-f0-9]+$/);
+  // Validate before Mongoose can create collections, and never drop a pre-existing database.
+  assert.match(new URL(uri).pathname.slice(1), /^the_daily_web_comments_test_[a-f0-9]+$/);
+  let disposable = false;
   t.after(async () => {
-    await mongoose.connection.dropDatabase();
-    await mongoose.disconnect();
+    try { if (disposable) await mongoose.connection.dropDatabase(); }
+    finally { await mongoose.disconnect(); }
   });
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000, autoCreate: false, autoIndex: false });
+  assert.deepEqual(await mongoose.connection.db.listCollections().toArray(), [], 'Use a fresh empty database.');
+  disposable = true;
   await verifyTransactions(mongoose.connection);
-  await Promise.all([Article.init(), Comment.init(), GuestCommentLimit.init(), User.init(), Session.init()]);
+  for (const Model of [Article, Comment, GuestCommentLimit, User, Session]) {
+    await Model.createCollection();
+    await Model.createIndexes();
+  }
 
   const reporter = new User({ username: 'comment-reporter', displayName: 'Real Reporter', role: 'reporter' });
   await reporter.setPassword('temporary-test-password');
