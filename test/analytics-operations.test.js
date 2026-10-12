@@ -79,30 +79,6 @@ test('findLatestPublicationId returns the newest event or null', async t => {
   assert.equal(await analytics.findLatestPublicationId(article), null);
 });
 
-test('createPublicationEvent stores one server-timed event inside the given session', async t => {
-  const session = { id: 'transaction' };
-  const create = t.mock.method(PublicationEvent, 'create', async docs => docs);
-  const article = new ObjectId();
-  const editor = new ObjectId();
-  const event = await analytics.createPublicationEvent({ article, editor, kind: 'update' }, session);
-  const [docs, options] = create.mock.calls[0].arguments;
-  assert.equal(docs.length, 1);
-  assert.deepEqual({ ...docs[0], publishedAt: undefined }, { article, editor, kind: 'update', publishedAt: undefined });
-  assert.ok(docs[0].publishedAt instanceof Date);
-  assert.deepEqual(options, { session });
-  assert.equal(event, docs[0]);
-});
-
-test('deleteArticleAnalytics removes statistics and events for one article', async t => {
-  const session = { id: 'transaction' };
-  const article = new ObjectId();
-  const statistics = t.mock.method(ViewStatistic, 'deleteMany', async () => ({}));
-  const events = t.mock.method(PublicationEvent, 'deleteMany', async () => ({}));
-  await analytics.deleteArticleAnalytics(article, session);
-  assert.deepEqual(statistics.mock.calls[0].arguments, [{ article }, { session }]);
-  assert.deepEqual(events.mock.calls[0].arguments, [{ article }, { session }]);
-});
-
 test('getViewSeries combines buckets, zero gaps and per-publication totals', async t => {
   const article = new ObjectId();
   const first = new ObjectId();

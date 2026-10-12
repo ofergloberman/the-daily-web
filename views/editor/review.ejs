@@ -6,8 +6,10 @@
 <body>
   <%- include('../partials/header') %>
   <div class="page-shell">
-    <main class="page-main">
+    <main class="page-main" id="review" data-article-id="<%= article._id %>">
       <p><a href="/editor">&larr; All articles</a></p>
+      <p id="action-status" role="status" hidden></p>
+      <div id="review-content">
       <header class="review-header">
         <p class="section-label">Review</p>
         <h1><%= article.draft?.title || article.published?.title || 'Untitled article' %></h1>
@@ -30,6 +32,8 @@
         <p class="notice">This article has never been published. Only the reporter's working draft exists.</p>
       <% } %>
 
+      <%- include('reviewActions', { article, canDecide, limits, noteMaxLength }) %>
+
       <% fields.forEach(field => { %>
         <section class="compare-field" aria-labelledby="field-<%= field.key %>">
           <h2 id="field-<%= field.key %>" class="compare-title">
@@ -50,8 +54,10 @@
           </div>
         </section>
       <% }) %>
+      </div>
     </main>
   </div>
   <%- include('../partials/footer') %>
+  <script src="/editor-actions.js" defer></script>
 </body>
 </html>
