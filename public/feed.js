@@ -21,7 +21,7 @@
 
   function params() {
     const data = new FormData(form);
-    return { q: String(data.get('q') || '').trim(), category: String(data.get('category') || ''), sort: String(data.get('sort') || 'date') };
+    return { q: String(data.get('q') || '').trim(), category: String(data.get('category') || ''), sort: String(data.get('sort') || 'date'), viewed: String(data.get('viewed') || 'all') };
   }
 
   function setStatus(text, retry) {
@@ -42,6 +42,13 @@
     return node;
   }
 
+  // "Politics, Viewed" for screen readers; the comma is visually hidden.
+  function viewedBadge() {
+    const badge = element('span', 'viewed-badge');
+    badge.append(element('span', 'visually-hidden', ', '), 'Viewed');
+    return badge;
+  }
+
   // Same markup as views/partials/articleCard.ejs. Text goes in through textContent, never innerHTML.
   function card(article) {
     const root = element('article', 'article-card');
@@ -52,7 +59,11 @@
       root.append(img);
     }
     const body = element('div', 'card-body');
-    if (article.category) body.append(element('p', 'card-category', article.category));
+    if (article.category || article.viewed) {
+      const label = element('p', 'card-category', article.category);
+      if (article.viewed) label.append(viewedBadge());
+      body.append(label);
+    }
     const title = element('h2', 'card-title');
     const link = element('a', '', article.title || 'Untitled article');
     link.href = `/articles/${encodeURIComponent(article.id)}`;
@@ -68,15 +79,24 @@
     return root;
   }
 
-  function showEmpty({ q, category }) {
+  function showEmpty({ q, category, viewed }) {
+    const filtered = q || category || viewed !== 'all';
+    const nothingViewed = viewed === 'viewed' && !q && !category;
     const box = element('div', 'empty-state');
-    box.append(element('h2', '', q || category ? 'No matching articles' : 'No articles yet'));
-    box.append(element('p', '', q || category ? 'Try another search or category.' : 'Published stories will appear here.'));
+    box.append(element('h2', '', nothingViewed ? 'Nothing viewed yet' : filtered ? 'No matching articles' : 'No articles yet'));
+    box.append(element('p', '', nothingViewed ? 'Articles you open on this device will appear here.' : filtered ? 'Try another search, category or view filter.' : 'Published stories will appear here.'));
     feed.append(box);
   }
 
-  async function load(reset) {
-    if (!reset && (state.loading || state.failed || !state.cursor)) return;
+  // Returns the in-flight page request, so callers can wait for it without starting a second one.
+  function load(reset) {
+    if (!reset && state.loading) return state.pending;
+    if (!reset && (state.failed || !state.cursor)) return Promise.resolve();
+    state.pending = fetchPage(reset);
+    return state.pending;
+  }
+
+  async function fetchPage(reset) {
     state.failed = false;
     if (reset) {
       state.controller?.abort();
@@ -124,7 +144,7 @@
   function applyFilters() {
     clearTimeout(searchTimer);
     const current = params();
-    const query = new URLSearchParams(Object.entries(current).filter(([key, value]) => value && !(key === 'sort' && value === 'date')));
+    const query = new URLSearchParams(Object.entries(current).filter(([key, value]) => value && !(key === 'sort' && value === 'date') && !(key === 'viewed' && value === 'all')));
     const url = query.toString() ? `/?${query}` : '/';
     if (url !== location.pathname + location.search) history.pushState(null, '', url);
     window.scrollTo({ top: 0 });
@@ -136,6 +156,7 @@
     form.q.value = query.get('q') || '';
     form.category.value = query.get('category') || '';
     form.sort.value = query.get('sort') || 'date';
+    form.viewed.value = query.get('viewed') || 'all';
     load(true);
   }
 
@@ -145,6 +166,53 @@
   form.q.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, SEARCH_DELAY_MS); });
   form.category.addEventListener('change', applyFilters);
   form.sort.addEventListener('change', applyFilters);
+  form.viewed.addEventListener('change', applyFilters);
+  // Coming Back from an article shows an old copy of this page: the whole page kept in memory
+  // (pageshow.persisted), or the cached first-page HTML, which browsers reuse for history navigation
+  // even with no-cache. Instead of reloading from the top, mark the articles opened from here and,
+  // for the cached HTML, load the batches the reader had and return to their scroll position.
+  const RETURN_KEY = 'feed:return';
+  const MAX_OPENED = 200;
+  function readReturn() {
+    try { return JSON.parse(window.sessionStorage.getItem(RETURN_KEY)) || null; } catch { return null; }
+  }
+  feed.addEventListener('click', event => {
+    const cardEl = event.target?.closest?.('.article-card');
+    if (!cardEl || !event.target.closest('a')) return;
+    const opened = [...new Set([...(readReturn()?.opened || []), cardEl.dataset.id])].slice(-MAX_OPENED);
+    try {
+      window.sessionStorage.setItem(RETURN_KEY, JSON.stringify({ search: location.search, count: state.seen.size, scrollY: window.scrollY, opened }));
+    } catch { /* Storage blocked: Back simply shows the page as the browser kept it. */ }
+  });
+
+  function markOpened(opened) {
+    const ids = new Set(opened);
+    const hideViewed = params().viewed === 'unviewed';
+    for (const cardEl of feed.querySelectorAll('.article-card')) {
+      if (!ids.has(cardEl.dataset.id)) continue;
+      if (hideViewed) { cardEl.remove(); continue; }
+      if (cardEl.querySelector('.viewed-badge')) continue;
+      let label = cardEl.querySelector('.card-category');
+      if (!label) {
+        label = element('p', 'card-category');
+        cardEl.querySelector('.card-body').prepend(label);
+      }
+      label.append(viewedBadge());
+    }
+    if (hideViewed && !feed.querySelector('.article-card')) showEmpty(params());
+  }
+
+  async function restoreReturn(keptInMemory) {
+    const saved = readReturn();
+    if (!saved || saved.search !== location.search) return;
+    markOpened(saved.opened);
+    if (keptInMemory) return; // Batches and scroll position are already as the reader left them.
+    while (state.cursor && !state.failed && state.seen.size < saved.count) await load(false);
+    markOpened(saved.opened);
+    window.scrollTo(0, saved.scrollY);
+  }
+  window.addEventListener('pageshow', event => { if (event.persisted) restoreReturn(true); });
+  if (window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward') restoreReturn(false);
 
   if (!state.cursor && state.seen.size) setStatus('You have reached the end of the feed.');
   if ('IntersectionObserver' in window) {

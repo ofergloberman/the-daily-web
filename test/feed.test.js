@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { app } = require('../app');
 const Article = require('../models/Article');
+const ViewedArticle = require('../models/ViewedArticle');
 const { CARD_FIELDS, encodeCursor, decodeCursor, feedFilter } = require('../models/publicArticleQueries');
 const { FEED_SIZE, parseFeedQuery } = require('../controllers/publicArticleController');
 
@@ -42,6 +43,7 @@ function mockStore(t, docs, calls = []) {
     };
   });
   t.mock.method(Article, 'distinct', async () => [...new Set(docs.map(doc => doc.published.category))]);
+  t.mock.method(ViewedArticle, 'find', () => ({ select() { return this; }, async lean() { return []; } }));
 }
 function makeDocs(count) {
   const base = Date.parse('2026-09-01T12:00:00Z');
@@ -60,8 +62,10 @@ async function listen(t) {
 }
 
 test('parseFeedQuery accepts defaults and rejects bad input with field errors', () => {
-  assert.deepEqual(parseFeedQuery({}).value, { q: '', category: '', sort: 'date', after: null });
-  assert.deepEqual(parseFeedQuery({ q: '  vote ', category: ' World ', sort: 'popular' }).value, { q: 'vote', category: 'World', sort: 'popular', after: null });
+  assert.deepEqual(parseFeedQuery({}).value, { q: '', category: '', sort: 'date', viewed: 'all', after: null });
+  assert.deepEqual(parseFeedQuery({ q: '  vote ', category: ' World ', sort: 'popular', viewed: 'unviewed' }).value, { q: 'vote', category: 'World', sort: 'popular', viewed: 'unviewed', after: null });
+  assert.ok(parseFeedQuery({ viewed: 'maybe' }).fields.viewed);
+  assert.ok(parseFeedQuery({ viewed: ['viewed', 'all'] }).fields.viewed);
   assert.ok(parseFeedQuery({ sort: 'random' }).fields.sort);
   assert.ok(parseFeedQuery({ q: 'x'.repeat(101) }).fields.q);
   assert.ok(parseFeedQuery({ q: ['a', 'b'] }).fields.q);
@@ -126,7 +130,7 @@ test('GET /articles returns only card fields and combines search with category',
   assert.deepEqual(pagination, { nextCursor: null, hasMore: false });
   assert.ok(data.length > 0);
   for (const article of data) {
-    assert.deepEqual(Object.keys(article).sort(), ['author', 'category', 'id', 'imageUrl', 'publishedAt', 'summary', 'title']);
+    assert.deepEqual(Object.keys(article).sort(), ['author', 'category', 'id', 'imageUrl', 'publishedAt', 'summary', 'title', 'viewed']);
     assert.equal(article.category, 'World');
     assert.match(article.title, /election/);
     assert.match(article.publishedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -151,7 +155,7 @@ test('homepage renders filters, categories and a no-JS "More articles" link', as
   assert.equal((html.match(/class="article-card"/g) || []).length, FEED_SIZE);
   const cursor = html.match(/data-next-cursor="([^"]+)"/)[1];
   assert.ok(decodeCursor(cursor, 'popular'));
-  assert.match(html, new RegExp(`href="/\\?q=&amp;category=World&amp;sort=popular&amp;cursor=${cursor}">More articles`));
+  assert.match(html, new RegExp(`href="/\\?q=&amp;category=World&amp;sort=popular&amp;viewed=all&amp;cursor=${cursor}">More articles`));
   assert.match(html, /<script src="\/feed.js" defer><\/script>/);
 
   const next = await (await fetch(`${base}/?category=World&sort=popular&cursor=${cursor}`)).text();
@@ -162,4 +166,46 @@ test('homepage renders filters, categories and a no-JS "More articles" link', as
   assert.equal(none.status, 200);
   assert.match(await none.text(), /No matching articles/);
   assert.equal((await fetch(`${base}/?sort=random`)).status, 200, 'bad values fall back to the default feed');
+});
+
+test('viewed filters join on this device inside MongoDB, after sorting and before the limit', async t => {
+  const { viewedPipeline, deviceHistoryPipeline } = require('../models/publicArticleQueries');
+  const filter = { published: { $ne: null } };
+  const pipeline = viewedPipeline({ filter, sort: 'popular', viewed: 'unviewed', deviceId: 'd'.repeat(64), limit: 20 });
+  assert.deepEqual(pipeline.map(stage => Object.keys(stage)[0]), ['$match', '$sort', '$lookup', '$match', '$limit', '$project']);
+  assert.equal(pipeline[0].$match, filter, 'search/keyset filter stays the first stage ($text must be first)');
+  assert.deepEqual(pipeline[1].$sort, { totalViews: -1, _id: -1 });
+  assert.deepEqual(pipeline[2].$lookup, { from: 'viewedarticles', localField: '_id', foreignField: 'article', pipeline: [{ $match: { deviceId: 'd'.repeat(64) } }, { $project: { _id: 1 } }], as: 'viewedBy' });
+  assert.deepEqual(pipeline[3].$match, { viewedBy: { $eq: [] } });
+  assert.deepEqual(viewedPipeline({ filter, sort: 'date', viewed: 'viewed', deviceId: 'x', limit: 20 })[3].$match, { viewedBy: { $ne: [] } });
+  assert.equal(pipeline[4].$limit, FEED_SIZE + 1);
+  assert.ok(!('draft' in pipeline[5].$project) && !('editorNote' in pipeline[5].$project) && !('published.body' in pipeline[5].$project));
+
+  const history = deviceHistoryPipeline({ filter, sort: 'date', deviceId: 'd'.repeat(64), limit: 20 });
+  assert.deepEqual(history[0], { $match: { deviceId: 'd'.repeat(64) } }, '"viewed" starts from the device history');
+  assert.equal(history[1].$lookup.pipeline[0].$match, filter);
+  assert.deepEqual(history.slice(-2), [{ $sort: { publishedAt: -1, _id: -1 } }, { $limit: FEED_SIZE + 1 }]);
+
+  const articlePipelines = [], historyPipelines = [];
+  const doc = { _id: new mongoose.Types.ObjectId(), publishedAt: new Date(), totalViews: 0, published: { title: 'Seen before', category: 'World' } };
+  t.mock.method(Article, 'aggregate', async stages => { articlePipelines.push(stages); return [doc]; });
+  t.mock.method(ViewedArticle, 'aggregate', async stages => { historyPipelines.push(stages); return [doc]; });
+  t.mock.method(Article, 'populate', async docs => docs.map(d => ({ ...d, author: { displayName: 'Dana' } })));
+  const base = await listen(t);
+  const device = 'e'.repeat(64);
+  const headers = { Cookie: `wd_device=${device}` };
+  const response = await fetch(`${base}/articles?viewed=viewed&category=World`, { headers });
+  assert.equal(response.headers.get('cache-control'), 'private, no-cache', 'per-device results must not be shared by caches');
+  const { data } = await response.json();
+  assert.equal(historyPipelines[0][0].$match.deviceId, device, 'the cookie device, never one from the query string');
+  assert.equal(historyPipelines[0][1].$lookup.pipeline[0].$match['published.category'], 'World');
+  assert.deepEqual(data.map(article => [article.title, article.viewed]), [['Seen before', true]]);
+
+  await fetch(`${base}/articles?viewed=unviewed&category=World&sort=popular`, { headers });
+  await fetch(`${base}/articles?viewed=viewed&q=vote`, { headers });
+  assert.deepEqual(articlePipelines.map(p => p[3].$match), [{ viewedBy: { $eq: [] } }, { viewedBy: { $ne: [] } }], 'unviewed, and viewed+search, walk the articles');
+  assert.equal(articlePipelines[0][2].$lookup.pipeline[0].$match.deviceId, device);
+  assert.equal(articlePipelines[0][0].$match['published.category'], 'World');
+  assert.deepEqual(articlePipelines[1][0].$match.$text, { $search: 'vote' });
+  assert.equal((await fetch(`${base}/articles?viewed=sometimes`)).status, 400);
 });
