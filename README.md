@@ -189,6 +189,20 @@ Expiry is the earlier of provider time plus 15 minutes and fetch time plus 15 mi
 
 Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-provider, controlled-clock tests covering cache reuse, concurrent visitors, timeouts, malformed responses, outages, retry backoff, freshness boundaries, public routing, and long-open page expiry. These tests do not call Open-Meteo or require MongoDB. `npm test` runs the regression suite.
 
+## Demo dataset
+
+`scripts/seedDemoFixtures.js` (`npm run seed:demo`) fills a database with submission-ready
+demo data: 500 articles spread across every status and category, six Reporter accounts and
+one Editor, guest and registered comments, articles mid-workflow (pending and returned,
+some re-reviewing an already-published update), published articles (some updated several
+times after first publication), and enough minute-bucketed view history to draw the Impact
+Analytics graph and its publication markers. It refuses to run unless `MONGODB_URI` points
+at a database whose name ends in `_demo`, and it is safe to re-run: it deletes and recreates
+only the `demo-*` accounts and their articles each time. Generated account passwords are
+printed once to the console and never stored in a file.
+
 ## Remaining work
 
-The remaining project requirements include recording visits against the served publication and `totalViews`, full news-feed interactions, and the 500-article demo dataset. View statistics, publication history, the Editor article list, review comparison and actions, and the analytics graph are in place.
+The remaining project requirement is full news-feed interactions. View statistics,
+publication history, the Editor article list, review comparison and actions, the analytics
+graph, and the 500-article demo dataset are in place.
