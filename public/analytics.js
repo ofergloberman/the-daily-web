@@ -15,6 +15,7 @@
   const timeZone = root.dataset.timeZone;
 
   const searchInput = document.getElementById('article-search');
+  const sortSelect = document.getElementById('article-sort');
   const searchStatus = document.getElementById('search-status');
   const results = document.getElementById('article-results');
   const panel = document.getElementById('analytics-panel');
@@ -255,7 +256,7 @@
       button.className = 'result-button';
       button.dataset.id = article.id;
       button.setAttribute('aria-current', String(article.id === selectedId));
-      button.textContent = `${article.title || 'Untitled article'} \u00b7 ${formatPublished(article.publishedAt)}`;
+      button.textContent = `${article.title || 'Untitled article'} \u00b7 ${formatPublished(article.publishedAt)} \u00b7 ${article.totalViews.toLocaleString('en-US')} total views`;
       item.append(button);
       return item;
     }));
@@ -265,7 +266,8 @@
     const request = ++searchRequest;
     searchStatus.textContent = 'Searching\u2026';
     try {
-      const articles = await getJson(`/analytics/articles?q=${encodeURIComponent(searchInput.value)}`);
+      const query = `q=${encodeURIComponent(searchInput.value)}&sort=${encodeURIComponent(sortSelect.value)}`;
+      const articles = await getJson(`/analytics/articles?${query}`);
       if (request !== searchRequest) return;
       renderResults(articles);
       searchStatus.textContent = articles.length ? '' : 'No published articles match.';
@@ -278,6 +280,7 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(search, SEARCH_DELAY_MS);
   });
+  sortSelect.addEventListener('change', search);
   results.addEventListener('click', event => {
     const button = event.target.closest('button[data-id]');
     if (button) selectArticle(button.dataset.id);

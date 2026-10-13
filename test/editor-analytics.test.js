@@ -142,13 +142,44 @@ test('analytics article search validates input and returns published titles only
 
   const found = await (await get('/analytics/articles?q=budget')(tokens.editor)).json();
   assert.deepEqual(find.mock.calls[0].arguments, [{ published: { $ne: null }, $text: { $search: 'budget' } }]);
-  assert.deepEqual(found.data, [{ id: String(id), title: 'Budget vote', publishedAt: '2026-10-01T00:00:00.000Z' }]);
+  assert.deepEqual(found.data, [{ id: String(id), title: 'Budget vote', publishedAt: '2026-10-01T00:00:00.000Z', totalViews: 0 }]);
 
   await get('/analytics/articles')(tokens.editor);
   assert.deepEqual(find.mock.calls[1].arguments, [{ published: { $ne: null } }]);
 
   assert.equal((await get(`/analytics/articles?q=${'x'.repeat(101)}`)(tokens.editor)).status, 400);
   assert.equal((await get('/analytics/articles?q=a&q=b')(tokens.editor)).status, 400);
+});
+
+test('analytics article search can order by popularity, with or without a search term', async t => {
+  const get = await startServer(t);
+  const calls = [];
+  const rows = [{ _id: new ObjectId(), published: { title: 'Most read' }, publishedAt: new Date('2026-10-01T00:00:00Z'), totalViews: 1234 }];
+  t.mock.method(Article, 'find', () => { const entry = {}; calls.push(entry); return queryDouble(rows, entry); });
+
+  const popular = await (await get('/analytics/articles?sort=popular')(tokens.editor)).json();
+  assert.deepEqual(calls[0].sort, { totalViews: -1, _id: -1 });
+  assert.equal(popular.data[0].totalViews, 1234);
+
+  await get('/analytics/articles?q=budget&sort=popular')(tokens.editor);
+  assert.deepEqual(calls[1].sort, { totalViews: -1, _id: -1 });
+  assert.equal(calls[1].select.totalViews, 1, 'popularity is selected for text searches too');
+
+  await get('/analytics/articles?sort=default')(tokens.editor);
+  assert.deepEqual(calls[2].sort, { publishedAt: -1, _id: -1 });
+  await get('/analytics/articles?q=budget')(tokens.editor);
+  assert.deepEqual(calls[3].sort, { score: { $meta: 'textScore' }, _id: -1 });
+});
+
+test('analytics article search rejects unknown or repeated sort values', async t => {
+  const get = await startServer(t);
+  const find = t.mock.method(Article, 'find', () => queryDouble([]));
+  for (const query of ['sort=views', 'sort=', 'sort=popular&sort=default', 'sort=%24where']) {
+    const response = await get(`/analytics/articles?${query}`)(tokens.editor);
+    assert.equal(response.status, 400, query);
+    assert.equal((await response.json()).error, 'INVALID_QUERY');
+  }
+  assert.equal(find.mock.callCount(), 0);
 });
 
 test('view series endpoint returns buckets and markers for a published article', async t => {

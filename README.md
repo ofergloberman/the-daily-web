@@ -154,7 +154,7 @@ An anonymous guest does not require a User document in the database. Passwords a
 | `/auth` | `GET /` login page, `POST /login`, `POST /logout`, `GET /me` |
 | `/reporter`, `/editor` | Reporter workspace and Editor desk |
 | `/editor` | `GET /?status=&page=` all articles with optional status filter, `GET /articles/:id` review page comparing the published snapshot with the working draft. Editor-only actions return `{ data: { id, status } }` or `{ error, message }`: `POST /articles/:id/approve` (pending to published), `POST /articles/:id/return` with `{ note }` (pending to returned), `PATCH /articles/:id` with content fields (edits the working copy), `DELETE /articles/:id` (removes the article with its comments, events and statistics). Errors: 401 guest, 403 Reporter, 404 unknown id, 409 invalid state, 400 missing note or invalid content |
-| `/analytics` | Editor only: `GET /` page, `GET /articles?q=` search published titles, `GET /articles/:id/views?from=&to=` views per time bucket and publication markers |
+| `/analytics` | Editor only: `GET /` page, `GET /articles?q=&sort=` search published titles (`sort` is `default`, newest first or best match, or `popular`, most `totalViews` first; each result includes `totalViews`; any other value returns 400), `GET /articles/:id/views?from=&to=` views per time bucket and publication markers |
 | `/reporter/articles` | `GET` paginated own articles, `POST` create a private draft |
 | `/reporter/articles/:id/edit` | `GET` edit an owned draft |
 | `/reporter/articles/:id/draft` | `PATCH` save the five working content fields |

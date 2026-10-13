@@ -15,6 +15,11 @@
         <h2 id="picker-title">Choose an article</h2>
         <label class="field-label" for="article-search">Search published titles</label>
         <input class="field" id="article-search" type="search" maxlength="100" autocomplete="off" placeholder="Leave empty to see the newest articles">
+        <label class="field-label sort-label" for="article-sort">Sort articles by</label>
+        <select class="field" id="article-sort">
+          <option value="default" selected>Newest first (best match when searching)</option>
+          <option value="popular">Most viewed (all-time total views)</option>
+        </select>
         <p class="loading" id="search-status" role="status"></p>
         <ul class="result-list" id="article-results"></ul>
       </section>

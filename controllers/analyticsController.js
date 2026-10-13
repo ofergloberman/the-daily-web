@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const analytics = require('../models/analyticsOperations');
-const { findPublishedForAnalytics, searchPublishedTitles } = require('../models/editorArticleQueries');
+const { SEARCH_SORTS, findPublishedForAnalytics, searchPublishedTitles } = require('../models/editorArticleQueries');
 const { SITE_TIME_ZONE } = require('../helpers/dates');
 
 const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -36,12 +36,18 @@ function showPage(req, res) {
 
 async function searchArticles(req, res, next) {
   const term = req.query.q ?? '';
+  const sort = req.query.sort ?? SEARCH_SORTS[0];
   if (typeof term !== 'string' || term.length > MAX_SEARCH_LENGTH) {
     return fail(res, 400, 'INVALID_QUERY', `Search text must be at most ${MAX_SEARCH_LENGTH} characters.`);
   }
+  if (typeof sort !== 'string' || !SEARCH_SORTS.includes(sort)) {
+    return fail(res, 400, 'INVALID_QUERY', `Sort must be one of: ${SEARCH_SORTS.join(', ')}.`);
+  }
   try {
-    const articles = await searchPublishedTitles(term.trim());
-    res.json({ data: articles.map(article => ({ id: String(article._id), title: article.published.title, publishedAt: article.publishedAt })) });
+    const articles = await searchPublishedTitles(term.trim(), sort);
+    res.json({ data: articles.map(article => ({
+      id: String(article._id), title: article.published.title, publishedAt: article.publishedAt, totalViews: article.totalViews ?? 0
+    })) });
   } catch (error) { next(error); }
 }
 
