@@ -91,8 +91,13 @@ async function viewedIdsAmong(deviceId, articles) {
 // article lookup per record the device has. Walking the feed costs about (limit + 1) * articles / records
 // lookups, since that share of articles is viewed. History wins when records^2 <= (limit + 1) * articles:
 // a device that opened 30 of 5000 articles starts from its history, one that opened 2500 walks the feed.
-async function historyIsSmaller(deviceId, limit) {
-  const [records, articles] = await Promise.all([ViewedArticle.countDocuments({ deviceId }), Article.estimatedDocumentCount()]);
+// Both counts read only index keys and run in one round trip. "articles" is the published feed (in the
+// category, if one is chosen), so a small category is not walked on the strength of the whole site's size.
+async function historyIsSmaller(deviceId, limit, category = '') {
+  const [records, articles] = await Promise.all([
+    ViewedArticle.countDocuments({ deviceId }),
+    Article.countDocuments(feedFilter({ category, sort: 'date' }))
+  ]);
   return records * records <= (limit + 1) * articles;
 }
 
@@ -100,7 +105,7 @@ async function findFeed({ q = '', category = '', sort = 'date', viewed = 'all', 
   const filter = feedFilter({ q, category, sort, after });
   if (viewed === 'viewed' && !deviceId) return { articles: [], hasMore: false, nextCursor: null };
   const joined = viewed !== 'all' && deviceId;
-  const fromHistory = joined && viewed === 'viewed' && !q && await historyIsSmaller(deviceId, limit);
+  const fromHistory = joined && viewed === 'viewed' && !q && await historyIsSmaller(deviceId, limit, category);
   const rows = !joined
     ? await Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(limit + 1).lean()
     : fromHistory

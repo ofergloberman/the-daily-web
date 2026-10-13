@@ -5,6 +5,7 @@
 // Usage: npm run explain:dev3 [-- --walk]
 const mongoose = require('mongoose');
 const { connectDatabase } = require('../config/database');
+const { assertDev3Uri } = require('./dev3Guard');
 const Article = require('../models/Article');
 const ViewedArticle = require('../models/ViewedArticle');
 const { SORTS, CARD_FIELDS, feedFilter, viewedPipeline, deviceHistoryPipeline, historyIsSmaller, findFeed, decodeCursor, encodeCursor } = require('../models/publicArticleQueries');
@@ -43,7 +44,7 @@ function summarize(explain) {
 async function explainFor({ q = '', category = '', sort, viewed, deviceId, after }) {
   const filter = feedFilter({ q, category, sort, after });
   if (viewed === 'all') return Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(LIMIT + 1).explain('executionStats');
-  if (viewed === 'viewed' && !q && await historyIsSmaller(deviceId, LIMIT)) return ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit: LIMIT })).explain('executionStats');
+  if (viewed === 'viewed' && !q && await historyIsSmaller(deviceId, LIMIT, category)) return ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit: LIMIT })).explain('executionStats');
   return Article.aggregate(viewedPipeline({ filter, sort, viewed, deviceId, limit: LIMIT })).explain('executionStats');
 }
 
@@ -120,8 +121,8 @@ async function walk() {
 }
 
 async function main() {
+  assertDev3Uri(process.env.MONGODB_URI);
   await connectDatabase(process.env.MONGODB_URI);
-  if (!mongoose.connection.name.endsWith('_dev3')) throw new Error(`Refusing to run against "${mongoose.connection.name}". Use a database name ending in _dev3.`);
   const passed = process.argv.includes('--walk') ? await walk() : await explain();
   if (!passed) process.exitCode = 1;
 }
@@ -129,4 +130,4 @@ async function main() {
 main().catch(error => {
   console.error(error.message);
   process.exitCode = 1;
-}).finally(async () => { await mongoose.disconnect(); });
+}).finally(() => mongoose.disconnect().catch(() => {}));

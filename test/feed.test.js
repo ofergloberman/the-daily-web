@@ -5,7 +5,8 @@ const mongoose = require('mongoose');
 const { app } = require('../app');
 const Article = require('../models/Article');
 const ViewedArticle = require('../models/ViewedArticle');
-const { CARD_FIELDS, encodeCursor, decodeCursor, feedFilter } = require('../models/publicArticleQueries');
+const { CARD_FIELDS, encodeCursor, decodeCursor, feedFilter, historyIsSmaller } = require('../models/publicArticleQueries');
+const { databaseName, assertDev3Uri } = require('../scripts/dev3Guard');
 const { FEED_SIZE, parseFeedQuery } = require('../controllers/publicArticleController');
 
 // Small in-memory evaluator for exactly the filter shapes feedFilter builds (keyset $or, category, published).
@@ -25,7 +26,7 @@ function matches(doc, filter) {
     return compare(value, cond) === 0 || value === cond;
   });
 }
-function mockStore(t, docs, calls = []) {
+function mockStore(t, docs, calls = [], viewedIds = []) {
   t.mock.method(Article, 'find', filter => {
     const call = { filter };
     calls.push(call);
@@ -46,7 +47,11 @@ function mockStore(t, docs, calls = []) {
     return rows.map(doc => ({ ...doc, author: { displayName: 'Dana Reporter' } }));
   });
   t.mock.method(Article, 'distinct', async () => [...new Set(docs.map(doc => doc.published.category))]);
-  t.mock.method(ViewedArticle, 'find', () => ({ select() { return this; }, async lean() { return []; } }));
+  t.mock.method(ViewedArticle, 'find', query => ({ select() { return this; }, async lean() {
+    calls.viewedQuery = query;
+    const asked = new Set(query.article.$in.map(String));
+    return viewedIds.filter(id => asked.has(String(id))).map(article => ({ article }));
+  } }));
 }
 function makeDocs(count) {
   const base = Date.parse('2026-09-01T12:00:00Z');
@@ -77,6 +82,50 @@ test('parseFeedQuery accepts defaults and rejects bad input with field errors', 
   const dateCursor = encodeCursor('date', { _id: new mongoose.Types.ObjectId(), publishedAt: new Date() });
   assert.ok(parseFeedQuery({ sort: 'popular', cursor: dateCursor }).fields.cursor, 'a cursor only works with the sort that made it');
   assert.ok(parseFeedQuery({ cursor: dateCursor }).value.after);
+  assert.ok(parseFeedQuery({ sort: ['popular', 'date'] }).fields.sort, 'repeated parameters are rejected, not silently picked');
+  assert.ok(parseFeedQuery({ cursor: [dateCursor, dateCursor] }).fields.cursor);
+});
+
+test('tampered cursors are rejected, whatever their shape', () => {
+  const id = String(new mongoose.Types.ObjectId());
+  const raw = value => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+  const bad = {
+    'fraction views': [raw({ s: 'popular', v: 1.5, id }), 'popular'],
+    'string views': [raw({ s: 'popular', v: '7', id }), 'popular'],
+    'unsafe integer': [raw({ s: 'popular', v: 2 ** 53, id }), 'popular'],
+    'invalid date': [raw({ s: 'date', v: 'not a date', id }), 'date'],
+    'bad id': [raw({ s: 'date', v: new Date().toISOString(), id: 'nope' }), 'date'],
+    'missing id': [raw({ s: 'date', v: new Date().toISOString() }), 'date'],
+    'JSON null': [raw('null'), 'date'],
+    'not JSON': [raw('{oops'), 'date']
+  };
+  for (const [label, [cursor, sort]] of Object.entries(bad)) assert.equal(decodeCursor(cursor, sort), null, label);
+  assert.ok(parseFeedQuery({ cursor: 'a'.repeat(201) }).fields.cursor, 'over-long cursors are rejected before decoding');
+});
+
+test('scripts and the integration test accept only a _dev3 database, decided from the URI', () => {
+  assert.equal(databaseName('mongodb+srv://user:p%40ss@cluster0.example.net/the_daily_web_dev3?retryWrites=true'), 'the_daily_web_dev3');
+  assert.equal(databaseName('mongodb://a:1,b:2/team_db'), 'team_db');
+  assert.equal(databaseName('mongodb+srv://cluster0.example.net/?retryWrites=true'), '');
+  assert.equal(assertDev3Uri('mongodb://localhost/x_dev3'), 'x_dev3');
+  assert.throws(() => assertDev3Uri('mongodb+srv://u:p@cluster0.example.net/the_daily_web'), /Refusing/);
+  assert.throws(() => assertDev3Uri('mongodb+srv://u:p@cluster0.example.net/?appName=x_dev3'), /Refusing/);
+  assert.throws(() => assertDev3Uri(undefined), /Refusing/);
+});
+
+test('the unfiltered feed marks exactly the cards this device opened, asking only about the page shown', async t => {
+  const docs = makeDocs(25);
+  const calls = [];
+  const opened = [docs[0]._id, docs[3]._id, docs[24]._id];
+  mockStore(t, docs, calls, opened);
+  const base = await listen(t);
+  const { data } = await (await fetch(`${base}/articles`, { headers: { Cookie: `wd_device=${'c'.repeat(64)}` } })).json();
+  const expected = new Set(opened.map(String));
+  assert.equal(data.length, FEED_SIZE);
+  assert.deepEqual(data.filter(card => card.viewed).map(card => card.id).sort(), data.filter(card => expected.has(card.id)).map(card => card.id).sort());
+  assert.ok(data.some(card => card.viewed), 'at least one opened article is on the first page');
+  assert.equal(calls.viewedQuery.deviceId, 'c'.repeat(64));
+  assert.equal(calls.viewedQuery.article.$in.length, FEED_SIZE, 'only the 20 cards shown, never the whole history');
 });
 
 test('cursors round-trip and build a keyset filter with an _id tie-breaker', () => {
@@ -196,7 +245,8 @@ test('viewed filters join on this device inside MongoDB, after sorting and befor
   t.mock.method(Article, 'populate', async docs => docs.map(d => ({ ...d, author: { displayName: 'Dana' } })));
   let historySize = 30;
   t.mock.method(ViewedArticle, 'countDocuments', async () => historySize);
-  t.mock.method(Article, 'estimatedDocumentCount', async () => 5000);
+  const articleCounts = [];
+  t.mock.method(Article, 'countDocuments', async filter => { articleCounts.push(filter); return 5000; });
   const base = await listen(t);
   const device = 'e'.repeat(64);
   const headers = { Cookie: `wd_device=${device}` };
@@ -220,4 +270,17 @@ test('viewed filters join on this device inside MongoDB, after sorting and befor
   await fetch(`${base}/articles?viewed=viewed`, { headers });
   assert.equal(historyPipelines.length, 1, 'no second history pipeline');
   assert.deepEqual(articlePipelines.at(-1)[3].$match, { viewedBy: { $ne: [] } });
+  assert.equal(articleCounts[0]['published.category'], 'World', 'the walk is priced on the chosen category');
+  assert.ok(!articleCounts[0].$or && !articleCounts[0].$text);
+});
+
+test('the history/walk choice switches exactly where records squared passes (limit + 1) * articles', async t => {
+  let records;
+  t.mock.method(ViewedArticle, 'countDocuments', async () => records);
+  t.mock.method(Article, 'countDocuments', async () => 5000);
+  // 21 * 5000 = 105000; 324^2 = 104976 <= 105000 < 325^2 = 105625.
+  for (const [count, expected] of [[0, true], [324, true], [325, false], [2500, false]]) {
+    records = count;
+    assert.equal(await historyIsSmaller('d'.repeat(64), FEED_SIZE), expected, `${count} records`);
+  }
 });

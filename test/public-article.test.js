@@ -163,7 +163,7 @@ test('opening an article marks it viewed for this device only, and a failure nev
   assert.equal((await fetch(url, { method: 'HEAD', headers: { Cookie: `wd_device=${device}` } })).status, 200);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(marks.length, 2, 'no record for a cookieless client (new random id each time) or a HEAD request');
-  assert.equal(visitsRecorded.length, 4, 'analytics counting is unchanged for those requests');
+  assert.equal(visitsRecorded.length, 3, 'a cookieless reader still counts as a visit; a HEAD request does not');
 
   ViewedArticle.markViewed.mock.restore();
   t.mock.method(ViewedArticle, 'markViewed', async () => { throw new Error('db down'); });

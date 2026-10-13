@@ -5,6 +5,7 @@
 const mongoose = require('mongoose');
 const { createHash, randomBytes } = require('node:crypto');
 const { connectDatabase } = require('../config/database');
+const { assertDev3Uri } = require('./dev3Guard');
 const { ROLES, ARTICLE_STATUSES } = require('../config/constants');
 const User = require('../models/User');
 const Article = require('../models/Article');
@@ -26,8 +27,8 @@ function random(seed) {
 async function main() {
   const count = Number(process.argv[2] || 5000);
   if (!Number.isInteger(count) || count < 1 || count > 50000) throw new Error('Article count must be an integer from 1 to 50000.');
+  assertDev3Uri(process.env.MONGODB_URI);
   await connectDatabase(process.env.MONGODB_URI);
-  if (!mongoose.connection.name.endsWith('_dev3')) throw new Error(`Refusing to seed database "${mongoose.connection.name}". Use a database name ending in _dev3.`);
   await Promise.all([Article.init(), ViewedArticle.init()]);
 
   let author = await User.findOne({ username: 'dev3-load' });
@@ -60,7 +61,7 @@ async function main() {
       const totalViews = Math.floor(rand() ** 4 * 1000);
       return { author: author._id, draft: content, published: content, status: ARTICLE_STATUSES.PUBLISHED, publishedAt, lastPublishedAt: publishedAt, totalViews };
     });
-    const created = await Article.insertMany(docs, { lean: true });
+    const created = await Article.insertMany(docs); // Not lean: schema defaults and timestamps apply.
     ids.push(...created.map(a => a._id));
   }
 
@@ -73,7 +74,7 @@ async function main() {
     const deviceId = createHash('sha256').update(`dev3-load-${d}`).digest('hex');
     for (const article of new Set(Array.from({ length: 20 }, () => pick(ids)))) records.push({ deviceId, article });
   }
-  for (let i = 0; i < records.length; i += BATCH) await ViewedArticle.insertMany(records.slice(i, i + BATCH), { ordered: false, lean: true });
+  for (let i = 0; i < records.length; i += BATCH) await ViewedArticle.insertMany(records.slice(i, i + BATCH), { ordered: false }); // firstViewedAt default feeds the TTL
 
   console.log(`Seeded ${ids.length} published articles and ${records.length} viewed records into ${mongoose.connection.name}.`);
   console.log(`Heavy reader device: ${DEVICES.heavy}`);
@@ -84,7 +85,7 @@ if (require.main === module) {
   main().catch(error => {
     console.error(error.message);
     process.exitCode = 1;
-  }).finally(async () => { await mongoose.disconnect(); });
+  }).finally(() => mongoose.disconnect().catch(() => {}));
 }
 
 module.exports = { DEVICES };

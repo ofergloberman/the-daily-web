@@ -15,7 +15,7 @@ function node(tag = 'div', className = '') {
   const el = {
     tag, className, children: [], dataset: {}, hidden: false, value: '', _text: '', parent: null,
     get textContent() { return this._text + this.children.map(c => (typeof c === 'string' ? c : c.textContent)).join(''); },
-    set textContent(value) { this._text = String(value); this.children = []; },
+    set textContent(value) { this._text = String(value); this.children = []; (this.texts ||= []).push(this._text); },
     append(...items) { for (const item of items) { if (typeof item === 'object') item.parent = el; this.children.push(item); } },
     prepend(item) { item.parent = el; this.children.unshift(item); },
     replaceChildren() { this.children = []; },
@@ -26,7 +26,7 @@ function node(tag = 'div', className = '') {
     closest(selector) { let at = el; while (at && !(selector === 'a' ? at.tag === 'a' : hasClass(at, selector.slice(1)))) at = at.parent; return at || null; },
     setAttribute(name, value) { this[`attr:${name}`] = value; },
     removeAttribute(name) { delete this[`attr:${name}`]; },
-    getBoundingClientRect() { return { top: 0 }; }, // The sentinel is always in view.
+    getBoundingClientRect() { return { top: el.top ?? 0 }; }, // The sentinel is always in view; cards can set top.
     focus() { el.focused = true; },
     addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
     dispatch(type, event = {}) { (listeners[type] || []).forEach(callback => callback({ preventDefault() {}, ...event })); }
@@ -59,7 +59,11 @@ function page({ cursor = 'cursor-1', fetch, navigation = 'navigate', cards = [],
   const windowListeners = {};
   const storage = new Map(stored ? [['feed:return', JSON.stringify(stored)]] : []);
   const scrolls = [];
-  const history = { entries: [], pushState(_s, _t, url) { this.entries.push(url); context.location.search = url.slice(1); } };
+  const history = {
+    entries: [], replaced: [],
+    pushState(_s, _t, url) { this.entries.push(url); context.location.search = url.slice(1); },
+    replaceState(_s, _t, url) { this.replaced.push(url); context.location.search = url.slice(1); }
+  };
   const context = {
     document: { getElementById: id => els[id], createElement: node },
     fetch, history, location: { pathname: '/', search }, innerHeight: 800, scrollY: 1234,
@@ -68,7 +72,7 @@ function page({ cursor = 'cursor-1', fetch, navigation = 'navigate', cards = [],
     AbortController, URLSearchParams, Intl, setTimeout, clearTimeout,
     scrollTo(...args) { scrolls.push(args); },
     addEventListener(type, callback) { (windowListeners[type] ||= []).push(callback); },
-    sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
+    sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => { if (context.storageFull) throw new Error('QuotaExceededError'); storage.set(key, value); }, removeItem: key => storage.delete(key) },
     performance: { getEntriesByType: () => [{ type: navigation }] }
   };
   context.window = context;
@@ -76,7 +80,9 @@ function page({ cursor = 'cursor-1', fetch, navigation = 'navigate', cards = [],
   return {
     feed, form, status: els['feed-status'], scroll: () => observer(), history, scrolls,
     stored: () => JSON.parse(storage.get('feed:return') || 'null'),
-    pageshow: persisted => (windowListeners.pageshow || []).forEach(callback => callback({ persisted }))
+    pageshow: persisted => (windowListeners.pageshow || []).forEach(callback => callback({ persisted })),
+    popstate: () => (windowListeners.popstate || []).forEach(callback => callback({})),
+    context
   };
 }
 
@@ -140,7 +146,7 @@ test('opening an article remembers it with the reader position', () => {
   const view = page({ cards, fetch: async () => ok([]) });
   const link = cards[1].querySelector('.card-title').children[0];
   view.feed.dispatch('click', { target: link });
-  assert.deepEqual(view.stored(), { search: '', count: 3, scrollY: 1234, opened: ['p1'] });
+  assert.deepEqual(view.stored(), { search: '', count: 3, scrollY: 1234, anchors: ['p1', 'p2'], offset: 0, opened: ['p1'] });
   view.feed.dispatch('click', { target: cards[1] }); // a click on the card but not its link is ignored
   view.feed.dispatch('click', { target: cards[2].querySelector('.card-title').children[0] });
   assert.deepEqual(view.stored().opened, ['p1', 'p2']);
@@ -188,4 +194,77 @@ test('Back is ignored when the saved state belongs to other filters or storage i
   page({ navigation: 'back_forward', fetch: async url => { calls.push(url); return ok([]); } });
   await flush();
   assert.equal(calls.length, 0);
+});
+
+test('"Skip to content" (a same-page link firing popstate) never resets the feed; a real Back does', async () => {
+  const calls = [];
+  const view = page({ cards: ['p0', 'p1'].map(id => serverCard(id)), fetch: async url => { calls.push(url); return ok([article('n1')]); } });
+  view.popstate(); // location.search is unchanged: only the #main fragment moved
+  await flush();
+  assert.equal(calls.length, 0);
+  assert.equal(view.feed.querySelectorAll('.article-card').length, 2);
+  view.context.location.search = '?q=vote';
+  view.popstate();
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /q=vote/);
+  assert.equal(view.form.q.value, 'vote');
+});
+
+test('typing pauses replace one history entry; a filter change adds a new one', async () => {
+  const view = page({ cursor: '', fetch: async () => ok([article('a')]) });
+  const wait = () => new Promise(resolve => setTimeout(resolve, 320));
+  for (const text of ['ele', 'elect', 'election']) { view.form.q.value = text; view.form.q.dispatch('input'); await wait(); }
+  assert.deepEqual(view.history.entries, ['/?q=ele']);
+  assert.deepEqual(view.history.replaced, ['/?q=elect', '/?q=election']);
+  view.form.sort.value = 'popular';
+  view.form.sort.dispatch('change');
+  assert.deepEqual(view.history.entries, ['/?q=ele', '/?q=election&sort=popular']);
+});
+
+test('scrolling while a search is still being typed keeps loading the search on screen', async () => {
+  const calls = [];
+  const view = page({ fetch: async url => { calls.push(url); return ok([article('m1')]); } });
+  view.form.q.value = 'half-typed';
+  view.form.q.dispatch('input'); // the 300 ms timer has not fired yet
+  view.scroll();
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.doesNotMatch(calls[0], /half-typed/, 'the next page of the current results, not the unapplied text with their cursor');
+});
+
+test('a reset announces the result count; appended batches only announce the end', async () => {
+  const responses = [ok([article('a'), article('b')], 'cursor-9'), ok([article('c')])];
+  const view = page({ cursor: '', fetch: async () => responses.shift() });
+  view.form.dispatch('submit');
+  for (let i = 0; i < 10; i++) await flush();
+  assert.deepEqual(view.status.texts.filter(Boolean), ['Loading articles…', 'Showing the first 2 articles.', 'You have reached the end of the feed.']);
+});
+
+test('Back under "Not viewed yet" with every shown card read fetches the next unread ones, with one empty box at most', async () => {
+  const calls = [];
+  const cards = ['p0', 'p1'].map(id => serverCard(id));
+  const view = page({ cards, viewed: 'unviewed', search: '?viewed=unviewed', stored: { search: '?viewed=unviewed', count: 2, scrollY: 0, opened: ['p0', 'p1'] }, fetch: async url => { calls.push(url); return ok([article('u1')]); } });
+  view.pageshow(true);
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(calls.length, 1, 'the cursor still has unread articles');
+  assert.deepEqual(view.feed.querySelectorAll('.article-card').map(c => c.dataset.id), ['u1']);
+  assert.equal(view.feed.querySelectorAll('.empty-state').length, 0);
+});
+
+test('Back scrolls to the card the reader was at, even when cards above it were removed', async () => {
+  const cards = ['p0', 'p1', 'p2', 'p3'].map(id => serverCard(id));
+  cards[3].top = 150; // where p3 sits now, after p1 and p2 left the "Not viewed yet" list
+  const view = page({ cards, viewed: 'unviewed', search: '?viewed=unviewed', cursor: '', stored: { search: '?viewed=unviewed', count: 4, scrollY: 900, anchors: ['p2', 'p3'], offset: 40, opened: ['p1', 'p2'] }, fetch: async () => ok([]) });
+  view.pageshow(true);
+  await flush();
+  assert.deepEqual(view.scrolls.at(-1), [0, 150 + 1234 - 40], 'p3 back at the height p2 had, not the old pixel offset');
+});
+
+test('when storage is full, an older saved position is cleared rather than restored later', () => {
+  const cards = ['p0', 'p1'].map(id => serverCard(id));
+  const view = page({ cards, stored: { search: '', count: 9, scrollY: 5000, opened: ['old'] }, fetch: async () => ok([]) });
+  view.context.storageFull = true;
+  view.feed.dispatch('click', { target: cards[1].querySelector('.card-title').children[0] });
+  assert.equal(view.stored(), null);
 });

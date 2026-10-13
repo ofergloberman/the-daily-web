@@ -19,10 +19,11 @@ function parseFeedQuery(query) {
   const q = text('q'), category = text('category'), sort = text('sort') || 'date', cursor = text('cursor'), viewed = text('viewed') || 'all';
   if (Array.isArray(query.q) || q.length > LIMITS.q) fields.q = `Search must be a single value of at most ${LIMITS.q} characters.`;
   if (Array.isArray(query.category) || category.length > LIMITS.category) fields.category = 'Category is not valid.';
-  if (!Object.hasOwn(SORTS, sort)) fields.sort = `Sort must be one of: ${Object.keys(SORTS).join(', ')}.`;
+  if (Array.isArray(query.sort) || !Object.hasOwn(SORTS, sort)) fields.sort = `Sort must be one of: ${Object.keys(SORTS).join(', ')}.`;
   if (Array.isArray(query.viewed) || !VIEWED_FILTERS.includes(viewed)) fields.viewed = `Viewed must be one of: ${VIEWED_FILTERS.join(', ')}.`;
   let after = null;
-  if (cursor && !fields.sort) {
+  if (Array.isArray(query.cursor)) fields.cursor = 'Cursor must be a single value.';
+  else if (cursor && !fields.sort) {
     after = cursor.length <= LIMITS.cursor ? decodeCursor(cursor, sort) : null;
     if (!after) fields.cursor = 'Cursor is not valid for this sort.';
   }
@@ -43,6 +44,7 @@ function cardJson(article) {
 
 // Visit statistics must never delay or break a public page, whether recordVisit throws or rejects.
 function recordVisitSafely(article, req) {
+  if (req.method !== 'GET') return; // Express also routes HEAD here; link checkers and previews are not readers.
   Promise.resolve().then(() => visits.recordVisit(article, req))
     .catch(error => console.error('Visit not recorded:', error?.name));
 }
