@@ -1,12 +1,15 @@
 const mongoose = require('mongoose');
 const Article = require('./Article');
+const ViewedArticle = require('./ViewedArticle');
 require('./User'); // populate('author') needs the User model registered, even outside the app.
 
 // Public reads see only the approved snapshot. Never select draft or editorNote here.
 // currentPublication is read with the snapshot (approve writes both together) so a visit is attributed to the version served.
 const PUBLIC_FIELDS = 'published publishedAt lastPublishedAt currentPublication author';
 const CARD_FIELDS = 'published.title published.summary published.category published.imageUrl publishedAt totalViews author';
+const CARD_PROJECTION = Object.fromEntries(CARD_FIELDS.split(' ').map(field => [field, 1]));
 const PUBLISHED = { published: { $ne: null } };
+const VIEWED_FILTERS = ['all', 'unviewed', 'viewed'];
 
 // Keyset ordering per sort. _id breaks ties so every article has exactly one position.
 // totalViews can change while a reader scrolls the popular feed: an article that moves above the
@@ -51,12 +54,55 @@ function feedFilter({ q, category, sort, after }) {
   return filter;
 }
 
-async function findFeed({ q = '', category = '', sort = 'date', after = null, limit }) {
-  const articles = await Article.find(feedFilter({ q, category, sort, after }))
-    .select(CARD_FIELDS).sort(SORTS[sort].order).limit(limit + 1)
-    .populate('author', 'displayName').lean();
+// Viewed/not-viewed is decided inside MongoDB, so the server never loads a device's whole history.
+// "Not viewed" (and "viewed" with a text search, since $text cannot run inside a $lookup) walks the
+// articles in feed order and joins each to this device's record through the unique (deviceId, article)
+// index, stopping once limit + 1 matches are found.
+function viewedPipeline({ filter, sort, viewed, deviceId, limit }) {
+  return [
+    { $match: filter },
+    { $sort: SORTS[sort].order },
+    { $lookup: { from: ViewedArticle.collection.collectionName, localField: '_id', foreignField: 'article', pipeline: [{ $match: { deviceId } }, { $project: { _id: 1 } }], as: 'viewedBy' } },
+    { $match: { viewedBy: viewed === 'viewed' ? { $ne: [] } : { $eq: [] } } },
+    { $limit: limit + 1 },
+    { $project: CARD_PROJECTION }
+  ];
+}
+
+// "Viewed" without a search starts from the device's own history instead, so a device that has read
+// only a few articles does not make MongoDB walk the whole feed to find them.
+function deviceHistoryPipeline({ filter, sort, deviceId, limit }) {
+  return [
+    { $match: { deviceId } },
+    { $lookup: { from: Article.collection.collectionName, localField: 'article', foreignField: '_id', pipeline: [{ $match: filter }, { $project: CARD_PROJECTION }], as: 'article' } },
+    { $unwind: '$article' },
+    { $replaceRoot: { newRoot: '$article' } },
+    { $sort: SORTS[sort].order },
+    { $limit: limit + 1 }
+  ];
+}
+
+async function viewedIdsAmong(deviceId, articles) {
+  if (!deviceId || !articles.length) return new Set();
+  const records = await ViewedArticle.find({ deviceId, article: { $in: articles.map(a => a._id) } }).select('article').lean();
+  return new Set(records.map(record => String(record.article)));
+}
+
+async function findFeed({ q = '', category = '', sort = 'date', viewed = 'all', after = null, deviceId = null, limit }) {
+  const filter = feedFilter({ q, category, sort, after });
+  if (viewed === 'viewed' && !deviceId) return { articles: [], hasMore: false, nextCursor: null };
+  const joined = viewed !== 'all' && deviceId;
+  const fromHistory = joined && viewed === 'viewed' && !q;
+  const rows = !joined ? null : fromHistory
+    ? await ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit }))
+    : await Article.aggregate(viewedPipeline({ filter, sort, viewed, deviceId, limit }));
+  const articles = joined
+    ? await Article.populate(rows, { path: 'author', select: 'displayName', options: { lean: true } })
+    : await Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(limit + 1).populate('author', 'displayName').lean();
   const hasMore = articles.length > limit;
   const page = articles.slice(0, limit);
+  const seen = joined ? null : await viewedIdsAmong(deviceId, page);
+  for (const article of page) article.viewed = joined ? viewed === 'viewed' : seen.has(String(article._id));
   return { articles: page, hasMore, nextCursor: hasMore ? encodeCursor(sort, page.at(-1)) : null };
 }
 
@@ -65,6 +111,6 @@ function findPublicCategories() {
 }
 
 module.exports = {
-  PUBLIC_FIELDS, CARD_FIELDS, SORTS,
-  findPublicById, findFeed, findPublicCategories, encodeCursor, decodeCursor, feedFilter
+  PUBLIC_FIELDS, CARD_FIELDS, SORTS, VIEWED_FILTERS,
+  findPublicById, findFeed, findPublicCategories, encodeCursor, decodeCursor, feedFilter, viewedPipeline, deviceHistoryPipeline
 };

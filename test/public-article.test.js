@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const { app } = require('../app');
 const Article = require('../models/Article');
 const Comment = require('../models/Comment');
+const ViewedArticle = require('../models/ViewedArticle');
 const { PUBLIC_FIELDS } = require('../models/publicArticleQueries');
 const { paragraphs } = require('../controllers/publicArticleController');
 const visits = require('../services/visits');
@@ -33,7 +34,8 @@ test('public article page renders only the published snapshot', async t => {
     };
   });
 
-  t.mock.method(visits, 'recordVisit', async () => {});
+  t.mock.method(ViewedArticle, 'markViewed', async () => {});
+  t.mock.method(visits, 'recordVisit', async () => {}); // D4 analytics would otherwise wait for a database.
   t.mock.method(Article, 'findOne', query => {
     let selected;
     return {
@@ -113,6 +115,8 @@ test('article body splits into trimmed non-empty paragraphs', () => {
 test('a failing recordVisit never breaks the article page', async t => {
   t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
   const article = { _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana' }, published: { title: 'Still readable', body: 'Body.' } };
+  t.mock.method(ViewedArticle, 'markViewed', async () => {});
+  t.mock.method(visits, 'recordVisit', async () => {}); // D4 analytics would otherwise wait for a database.
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
   t.mock.method(console, 'error', () => {});
   const server = app.listen(0, '127.0.0.1');
@@ -129,6 +133,8 @@ test('a failing recordVisit never breaks the article page', async t => {
 
 test('comment database errors reach the request error handler', async t => {
   const article = { _id: new mongoose.Types.ObjectId(), published: { title: 'Public', body: 'Body' } };
+  t.mock.method(ViewedArticle, 'markViewed', async () => {});
+  t.mock.method(visits, 'recordVisit', async () => {}); // D4 analytics would otherwise wait for a database.
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
   t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { throw new Error('private database details'); } }));
   t.mock.method(console, 'error', () => {});
@@ -138,4 +144,40 @@ test('comment database errors reach the request error handler', async t => {
   const response = await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`);
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: 'INTERNAL_SERVER_ERROR' });
+});
+
+test('opening an article marks it viewed for this device only, and a failure never breaks the page', async t => {
+  const article = { _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana' }, published: { title: 'Viewed story', body: 'Body.' } };
+  t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
+  t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
+  t.mock.method(console, 'error', () => {});
+  const visitsRecorded = [];
+  t.mock.method(visits, 'recordVisit', async visited => { visitsRecorded.push(String(visited._id)); });
+  const marks = [];
+  t.mock.method(ViewedArticle, 'markViewed', async (deviceId, articleId) => { marks.push([deviceId, String(articleId)]); });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/articles/${article._id}`;
+  const device = 'd'.repeat(64);
+
+  assert.equal((await fetch(url, { headers: { Cookie: `wd_device=${device}` } })).status, 200);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(marks, [[device, String(article._id)]]);
+  await fetch(url, { headers: { Cookie: `wd_device=${device}` } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(visitsRecorded.length, 2, 'every visit still counts in D4 analytics');
+  assert.equal(marks.length, 2, 'each visit with a cookie asks to mark; the upsert makes repeats harmless');
+
+  const cookieless = await fetch(url);
+  assert.equal(cookieless.status, 200);
+  assert.match(cookieless.headers.get('set-cookie'), /^wd_device=/);
+  assert.equal((await fetch(url, { method: 'HEAD', headers: { Cookie: `wd_device=${device}` } })).status, 200);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(marks.length, 2, 'no record for a cookieless client (new random id each time) or a HEAD request');
+  assert.equal(visitsRecorded.length, 4, 'analytics counting is unchanged for those requests');
+
+  ViewedArticle.markViewed.mock.restore();
+  t.mock.method(ViewedArticle, 'markViewed', async () => { throw new Error('db down'); });
+  assert.equal((await fetch(url, { headers: { Cookie: `wd_device=${device}` } })).status, 200);
 });
