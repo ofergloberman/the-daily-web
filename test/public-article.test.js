@@ -77,6 +77,11 @@ test('public article page renders only the published snapshot', async t => {
   assert.match(html, /class="comment-form" action="\/comments"/);
   assert.match(html, /href="\/article-comments.css"/);
   assert.match(html, /src="\/article-comments.js" defer/);
+  // Keyboard users can jump past the header; the weather box sits in the sidebar after the comments.
+  assert.match(html, /<body>\s*<a class="skip-link" href="#main">/);
+  assert.match(html, /<main class="page-main" id="main" tabindex="-1">/);
+  assert.ok(html.indexOf('id="comments"') < html.indexOf('id="weather-slot"'));
+  assert.match(html, /src="\/weather.js" defer/);
   rows = [];
   const emptyHtml = await (await fetch(`${base}/articles/${live._id}`)).text();
   assert.match(emptyHtml, /data-comments-empty>No comments yet/);
