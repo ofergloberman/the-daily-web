@@ -68,8 +68,8 @@ function viewedPipeline({ filter, sort, viewed, deviceId, limit }) {
   ];
 }
 
-// "Viewed" without a search starts from the device's own history instead, so a device that has read
-// only a few articles does not make MongoDB walk the whole feed to find them.
+// "Viewed" without a search can start from the device's own history instead, so a device that has read
+// only a few articles does not make MongoDB walk the whole feed to find them (see historyIsSmaller).
 function deviceHistoryPipeline({ filter, sort, deviceId, limit }) {
   return [
     { $match: { deviceId } },
@@ -87,20 +87,31 @@ async function viewedIdsAmong(deviceId, articles) {
   return new Set(records.map(record => String(record.article)));
 }
 
+// For "viewed" without a search, pick the cheaper side to start from. Starting from the history costs one
+// article lookup per record the device has. Walking the feed costs about (limit + 1) * articles / records
+// lookups, since that share of articles is viewed. History wins when records^2 <= (limit + 1) * articles:
+// a device that opened 30 of 5000 articles starts from its history, one that opened 2500 walks the feed.
+async function historyIsSmaller(deviceId, limit) {
+  const [records, articles] = await Promise.all([ViewedArticle.countDocuments({ deviceId }), Article.estimatedDocumentCount()]);
+  return records * records <= (limit + 1) * articles;
+}
+
 async function findFeed({ q = '', category = '', sort = 'date', viewed = 'all', after = null, deviceId = null, limit }) {
   const filter = feedFilter({ q, category, sort, after });
   if (viewed === 'viewed' && !deviceId) return { articles: [], hasMore: false, nextCursor: null };
   const joined = viewed !== 'all' && deviceId;
-  const fromHistory = joined && viewed === 'viewed' && !q;
-  const rows = !joined ? null : fromHistory
-    ? await ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit }))
-    : await Article.aggregate(viewedPipeline({ filter, sort, viewed, deviceId, limit }));
-  const articles = joined
-    ? await Article.populate(rows, { path: 'author', select: 'displayName', options: { lean: true } })
-    : await Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(limit + 1).populate('author', 'displayName').lean();
-  const hasMore = articles.length > limit;
-  const page = articles.slice(0, limit);
-  const seen = joined ? null : await viewedIdsAmong(deviceId, page);
+  const fromHistory = joined && viewed === 'viewed' && !q && await historyIsSmaller(deviceId, limit);
+  const rows = !joined
+    ? await Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(limit + 1).lean()
+    : fromHistory
+      ? await ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit }))
+      : await Article.aggregate(viewedPipeline({ filter, sort, viewed, deviceId, limit }));
+  const hasMore = rows.length > limit;
+  // Author names and this device's viewed marks are independent, so they share one database round trip.
+  const [page, seen] = await Promise.all([
+    Article.populate(rows.slice(0, limit), { path: 'author', select: 'displayName', options: { lean: true } }),
+    joined ? null : viewedIdsAmong(deviceId, rows.slice(0, limit))
+  ]);
   for (const article of page) article.viewed = joined ? viewed === 'viewed' : seen.has(String(article._id));
   return { articles: page, hasMore, nextCursor: hasMore ? encodeCursor(sort, page.at(-1)) : null };
 }
@@ -111,5 +122,5 @@ function findPublicCategories() {
 
 module.exports = {
   PUBLIC_FIELDS, CARD_FIELDS, SORTS, VIEWED_FILTERS,
-  findPublicById, findFeed, findPublicCategories, encodeCursor, decodeCursor, feedFilter, viewedPipeline, deviceHistoryPipeline
+  findPublicById, findFeed, findPublicCategories, encodeCursor, decodeCursor, feedFilter, viewedPipeline, deviceHistoryPipeline, historyIsSmaller
 };

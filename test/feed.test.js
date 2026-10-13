@@ -33,14 +33,17 @@ function mockStore(t, docs, calls = []) {
       select(fields) { call.select = fields; return this; },
       sort(order) { call.sort = order; return this; },
       limit(count) { call.limit = count; return this; },
-      populate(path, fields) { call.populate = [path, fields]; return this; },
       async lean() {
         const keys = Object.entries(call.sort);
         return docs.filter(doc => matches(doc, filter))
           .sort((a, b) => { for (const [k, dir] of keys) { const c = compare(get(a, k), get(b, k)); if (c) return dir * c; } return 0; })
-          .slice(0, call.limit).map(doc => ({ ...doc, author: { displayName: 'Dana Reporter' } }));
+          .slice(0, call.limit).map(doc => ({ ...doc }));
       }
     };
+  });
+  t.mock.method(Article, 'populate', async (rows, options) => {
+    calls.populate = options;
+    return rows.map(doc => ({ ...doc, author: { displayName: 'Dana Reporter' } }));
   });
   t.mock.method(Article, 'distinct', async () => [...new Set(docs.map(doc => doc.published.category))]);
   t.mock.method(ViewedArticle, 'find', () => ({ select() { return this; }, async lean() { return []; } }));
@@ -115,7 +118,7 @@ test('GET /articles walks every article exactly once, in order, for both sorts',
     assert.deepEqual(ids, expected);
   }
   assert.ok(calls.every(call => call.limit === FEED_SIZE + 1 && call.select === CARD_FIELDS));
-  assert.deepEqual(calls[0].populate, ['author', 'displayName']);
+  assert.deepEqual([calls.populate.path, calls.populate.select], ['author', 'displayName']);
   assert.deepEqual(calls[0].sort, { publishedAt: -1, _id: -1 });
 });
 
@@ -191,6 +194,9 @@ test('viewed filters join on this device inside MongoDB, after sorting and befor
   t.mock.method(Article, 'aggregate', async stages => { articlePipelines.push(stages); return [doc]; });
   t.mock.method(ViewedArticle, 'aggregate', async stages => { historyPipelines.push(stages); return [doc]; });
   t.mock.method(Article, 'populate', async docs => docs.map(d => ({ ...d, author: { displayName: 'Dana' } })));
+  let historySize = 30;
+  t.mock.method(ViewedArticle, 'countDocuments', async () => historySize);
+  t.mock.method(Article, 'estimatedDocumentCount', async () => 5000);
   const base = await listen(t);
   const device = 'e'.repeat(64);
   const headers = { Cookie: `wd_device=${device}` };
@@ -208,4 +214,10 @@ test('viewed filters join on this device inside MongoDB, after sorting and befor
   assert.equal(articlePipelines[0][0].$match['published.category'], 'World');
   assert.deepEqual(articlePipelines[1][0].$match.$text, { $search: 'vote' });
   assert.equal((await fetch(`${base}/articles?viewed=sometimes`)).status, 400);
+
+  // A device that opened half the site walks the feed instead: 2500^2 > 21 * 5000.
+  historySize = 2500;
+  await fetch(`${base}/articles?viewed=viewed`, { headers });
+  assert.equal(historyPipelines.length, 1, 'no second history pipeline');
+  assert.deepEqual(articlePipelines.at(-1)[3].$match, { viewedBy: { $ne: [] } });
 });
