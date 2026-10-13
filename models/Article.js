@@ -36,4 +36,6 @@ articleSchema.index({ publishedAt: -1 });
 articleSchema.index({ totalViews: -1 });
 articleSchema.index({ 'published.category': 1, publishedAt: -1 });
 articleSchema.index({ 'published.title': 'text' });
+// Supports the Editor desk list query (filter by status, newest-updated first).
+articleSchema.index({ status: 1, updatedAt: -1 });
 module.exports = mongoose.model('Article', articleSchema);
