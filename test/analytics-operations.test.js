@@ -3,10 +3,16 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const PublicationEvent = require('../models/PublicationEvent');
 const ViewStatistic = require('../models/ViewStatistic');
+const Article = require('../models/Article');
 const analytics = require('../models/analyticsOperations');
 const visits = require('../services/visits');
 
 const { ObjectId } = mongoose.Types;
+
+// Article.updateOne reports how many articles matched; a deleted article matches none.
+function mockArticleUpdate(t, matchedCount = 1) {
+  return t.mock.method(Article, 'updateOne', async () => ({ matchedCount }));
+}
 
 test('minuteStart truncates to the UTC minute', () => {
   assert.equal(analytics.minuteStart(new Date('2026-10-02T14:03:59.999Z')).toISOString(), '2026-10-02T14:03:00.000Z');
@@ -33,6 +39,7 @@ test('fillSeries adds zero-view buckets for quiet periods', () => {
 });
 
 test('recordVisit increments the minute bucket with an atomic upsert', async t => {
+  mockArticleUpdate(t);
   const updateOne = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
   const article = new ObjectId();
   const publication = new ObjectId();
@@ -45,7 +52,31 @@ test('recordVisit increments the minute bucket with an atomic upsert', async t =
   ]);
 });
 
+test('recordVisit also increments totalViews without touching updatedAt', async t => {
+  const articleUpdate = mockArticleUpdate(t);
+  t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  const article = new ObjectId();
+  await analytics.recordVisit(article, new ObjectId());
+  assert.deepEqual(articleUpdate.mock.calls[0].arguments, [{ _id: article }, { $inc: { totalViews: 1 } }, { timestamps: false }]);
+});
+
+test('recordVisit counts popularity but no bucket when no publication was served', async t => {
+  const articleUpdate = mockArticleUpdate(t);
+  const bucket = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  await analytics.recordVisit(new ObjectId(), null);
+  assert.equal(articleUpdate.mock.callCount(), 1);
+  assert.equal(bucket.mock.callCount(), 0);
+});
+
+test('recordVisit leaves no statistics behind for an article that no longer exists', async t => {
+  mockArticleUpdate(t, 0);
+  const bucket = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  await analytics.recordVisit(new ObjectId(), new ObjectId());
+  assert.equal(bucket.mock.callCount(), 0);
+});
+
 test('recordVisit retries once when a concurrent visit created the bucket first', async t => {
+  mockArticleUpdate(t);
   let attempts = 0;
   t.mock.method(ViewStatistic, 'updateOne', async () => {
     attempts += 1;
@@ -57,6 +88,7 @@ test('recordVisit retries once when a concurrent visit created the bucket first'
 });
 
 test('recordVisit does not hide repeated or unrelated database errors', async t => {
+  mockArticleUpdate(t);
   const updateOne = t.mock.method(ViewStatistic, 'updateOne', async () => { throw Object.assign(new Error('duplicate key'), { code: 11000 }); });
   await assert.rejects(analytics.recordVisit(new ObjectId(), new ObjectId()), { code: 11000 });
   assert.equal(updateOne.mock.callCount(), 2);
@@ -66,17 +98,11 @@ test('recordVisit does not hide repeated or unrelated database errors', async t 
   assert.equal(failing.mock.callCount(), 1);
 });
 
-test('findLatestPublicationId returns the newest event or null', async t => {
-  const id = new ObjectId();
-  let found = { _id: id };
-  const query = { sort(order) { this.order = order; return this; }, select() { return this; }, async lean() { return found; } };
-  const findOne = t.mock.method(PublicationEvent, 'findOne', () => query);
-  const article = new ObjectId();
-  assert.equal(await analytics.findLatestPublicationId(article), id);
-  assert.deepEqual(findOne.mock.calls[0].arguments, [{ article }]);
-  assert.deepEqual(query.order, { publishedAt: -1 });
-  found = null;
-  assert.equal(await analytics.findLatestPublicationId(article), null);
+test('recordVisit stops before the bucket when the popularity counter fails', async t => {
+  t.mock.method(Article, 'updateOne', async () => { throw new Error('article write failed'); });
+  const bucket = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  await assert.rejects(analytics.recordVisit(new ObjectId(), new ObjectId()), { message: 'article write failed' });
+  assert.equal(bucket.mock.callCount(), 0);
 });
 
 test('getViewSeries combines buckets, zero gaps and per-publication totals', async t => {
@@ -122,18 +148,16 @@ test('getViewSeries lists publications without views in the range as zero', asyn
   assert.equal(series.publications[0].views, 0);
 });
 
-test('the visit service attributes a view to the latest publication', async t => {
-  const article = { _id: new ObjectId() };
-  const publication = new ObjectId();
-  t.mock.method(analytics, 'findLatestPublicationId', async () => publication);
+test('the visit service attributes a view to the publication the reader was served', async t => {
+  const article = { _id: new ObjectId(), currentPublication: new ObjectId() };
   const record = t.mock.method(analytics, 'recordVisit', async () => {});
   await visits.recordVisit(article);
-  assert.deepEqual(record.mock.calls[0].arguments, [article._id, publication]);
+  assert.deepEqual(record.mock.calls[0].arguments, [article._id, article.currentPublication]);
 });
 
-test('the visit service skips articles that have no publication event', async t => {
-  t.mock.method(analytics, 'findLatestPublicationId', async () => null);
+test('the visit service still counts articles that have no current publication', async t => {
+  const article = { _id: new ObjectId() };
   const record = t.mock.method(analytics, 'recordVisit', async () => {});
-  await visits.recordVisit({ _id: new ObjectId() });
-  assert.equal(record.mock.callCount(), 0);
+  await visits.recordVisit(article);
+  assert.deepEqual(record.mock.calls[0].arguments, [article._id, null]);
 });

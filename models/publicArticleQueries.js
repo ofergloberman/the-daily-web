@@ -3,7 +3,8 @@ const Article = require('./Article');
 require('./User'); // populate('author') needs the User model registered, even outside the app.
 
 // Public reads see only the approved snapshot. Never select draft or editorNote here.
-const PUBLIC_FIELDS = 'published publishedAt lastPublishedAt author';
+// currentPublication is read with the snapshot (approve writes both together) so a visit is attributed to the version served.
+const PUBLIC_FIELDS = 'published publishedAt lastPublishedAt currentPublication author';
 const CARD_FIELDS = 'published.title published.summary published.category published.imageUrl publishedAt totalViews author';
 const PUBLISHED = { published: { $ne: null } };
 

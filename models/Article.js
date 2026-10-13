@@ -32,6 +32,9 @@ const articleSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 articleSchema.index({ author: 1, status: 1 });
+// Editor desk: newest-updated first, with and without a status filter (see editorArticleQueries.listForEditor).
+articleSchema.index({ status: 1, updatedAt: -1, _id: -1 });
+articleSchema.index({ updatedAt: -1, _id: -1 });
 articleSchema.index({ publishedAt: -1 });
 articleSchema.index({ totalViews: -1 });
 articleSchema.index({ 'published.category': 1, publishedAt: -1 });

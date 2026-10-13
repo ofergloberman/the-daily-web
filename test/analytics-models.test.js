@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
+const Article = require('../models/Article');
 const PublicationEvent = require('../models/PublicationEvent');
 const ViewStatistic = require('../models/ViewStatistic');
 
@@ -50,4 +51,10 @@ test('analytics schemas reject incomplete events and invalid buckets', async () 
     await assert.rejects(new ViewStatistic({ ...bucket, minute }).validate(),
       error => Boolean(error.errors.minute));
   }
+});
+
+test('the Editor desk has indexes that match its sort with and without a status filter', () => {
+  const keys = Article.schema.indexes().map(([fields]) => JSON.stringify(fields));
+  assert.ok(keys.includes(JSON.stringify({ status: 1, updatedAt: -1, _id: -1 })));
+  assert.ok(keys.includes(JSON.stringify({ updatedAt: -1, _id: -1 })));
 });

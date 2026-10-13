@@ -134,7 +134,7 @@ Future view recording must use an atomic `$inc` with an upsert, rather than read
 
 ### Analytics operations (D4)
 
-- `recordVisit(articleId, publicationId, visitTime)` increments the minute bucket with one atomic `$inc` upsert and retries once if a concurrent first visit wins the unique-index race. `services/visits.js` calls it from the public article page, attributing the view to the article's newest publication event; articles without an event are not counted.
+- `recordVisit(articleId, publicationId, visitTime)` makes two atomic increments, not a transaction, so visits to a popular article never conflict. First it adds one to `Article.totalViews` (the homepage "Most popular" sort) without changing `updatedAt`. Then, if the article exists and a publication was served, it increments the minute bucket with one `$inc` upsert, retrying once if a concurrent first visit wins the unique-index race. `services/visits.js` passes the article's `currentPublication`, the version the reader was served, which the public page reads together with the snapshot. Articles without a publication still count toward popularity but have no bucket. If a failure falls between the two writes, the counters differ by one visit.
 - `getViewSeries(articleId, from, to)` returns views per bucket and every publication with its views in the range. Ranges are at most 366 days. The bucket is a minute up to 6 hours, an hour up to 31 days, and a day (UTC) beyond that, so a graph never exceeds about 750 points. Empty buckets are returned as zero.
 
 ## Agreed roles
@@ -191,4 +191,4 @@ Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-pr
 
 ## Remaining work
 
-The remaining project requirements include recording visits against the served publication and `totalViews`, full news-feed interactions, and the 500-article demo dataset. View statistics, publication history, the Editor article list, review comparison and actions, and the analytics graph are in place.
+The remaining project requirements include full news-feed interactions and the 500-article demo dataset, whose seed must set `totalViews` to match each article's view buckets. Visit counting, publication history, the Editor article list, review comparison and actions, and the analytics graph are in place.
