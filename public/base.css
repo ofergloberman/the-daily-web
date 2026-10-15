@@ -8,6 +8,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--blue-dark); }
 img { max-width: 100%; height: auto; }
 [hidden] { display: none !important; }
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 10; padding: .6rem 1rem; background: var(--white); color: var(--blue-dark); font-weight: 700; }
+.skip-link:focus { top: 1rem; }
+#main:focus { outline: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #76b8e4; outline-offset: 2px; }
 h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap: anywhere; }
@@ -17,6 +20,7 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .brand { color: white; font: 700 1.45rem/1.1 Georgia, serif; text-decoration: none; letter-spacing: -.02em; }
 .header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 1.3rem; font-size: .9rem; }
 .header-actions a { color: white; }
+.header-user { overflow-wrap: anywhere; min-width: 0; }
 .header-actions form { margin: 0; }
 .text-button { padding: 0; border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; }
 .header-actions .text-button { color: white; }
@@ -61,18 +65,18 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .article-card { display: flex; gap: 1.25rem; padding: 1.4rem 0; border-bottom: 1px solid var(--line); }
 .card-image { flex: 0 0 220px; width: 220px; aspect-ratio: 3 / 2; object-fit: cover; background: var(--line); }
 .card-body { flex: 1 1 0; min-width: 0; }
-.card-category { margin: 0 0 .35rem; color: var(--blue-dark); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.card-category { overflow-wrap: anywhere; margin: 0 0 .35rem; color: var(--blue-dark); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .viewed-badge { margin-left: .4rem; padding: .05rem .45rem; border-radius: 99px; background: #e7edf2; color: #344e63; font-size: .72rem; letter-spacing: 0; text-transform: none; }
 .card-title { margin: 0; font-size: 1.4rem; line-height: 1.25; }
 .card-title a { color: var(--ink); text-decoration: none; }
 .card-title a:hover { text-decoration: underline; }
-.card-summary { margin: .5rem 0 0; color: var(--ink); }
-.card-meta { margin: .5rem 0 0; color: var(--muted); font-size: .85rem; }
+.card-summary { margin: .5rem 0 0; color: var(--ink); overflow-wrap: anywhere; }
+.card-meta { overflow-wrap: anywhere; margin: .5rem 0 0; color: var(--muted); font-size: .85rem; }
 
 /* Single article page */
 .article-page header h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.08; }
-.article-summary { margin: 1rem 0 0; color: var(--muted); font-size: 1.15rem; }
-.article-meta { margin: 1rem 0 0; color: var(--muted); font-size: .9rem; }
+.article-summary { margin: 1rem 0 0; overflow-wrap: anywhere; color: var(--muted); font-size: 1.15rem; }
+.article-meta { overflow-wrap: anywhere; margin: 1rem 0 0; color: var(--muted); font-size: .9rem; }
 .article-image { display: block; width: 100%; margin: 2rem 0 0; }
 .article-body { margin-top: 2rem; max-width: 42rem; font-size: 1.08rem; line-height: 1.75; }
 .article-body p { margin: 0 0 1.2rem; overflow-wrap: anywhere; }
@@ -81,6 +85,8 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 @media (max-width: 900px) {
   .page-shell { flex-direction: column; align-items: stretch; }
   .sidebar { flex: none; }
+  /* The homepage feed scrolls without end, so the weather box comes first instead of below it. */
+  .feed-page .sidebar { order: -1; }
 }
 /* Mobile */
 @media (max-width: 600px) {

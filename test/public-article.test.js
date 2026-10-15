@@ -78,6 +78,11 @@ test('public article page renders only the published snapshot', async t => {
   assert.match(html, /class="comment-form" action="\/comments"/);
   assert.match(html, /href="\/article-comments.css"/);
   assert.match(html, /src="\/article-comments.js" defer/);
+  // Keyboard users can jump past the header; the weather box sits in the sidebar after the comments.
+  assert.match(html, /<body>\s*<a class="skip-link" href="#main">/);
+  assert.match(html, /<main class="page-main" id="main" tabindex="-1">/);
+  assert.ok(html.indexOf('id="comments"') < html.indexOf('id="weather-slot"'));
+  assert.match(html, /src="\/weather.js" defer/);
   rows = [];
   const emptyHtml = await (await fetch(`${base}/articles/${live._id}`)).text();
   assert.match(emptyHtml, /data-comments-empty>No comments yet/);
@@ -190,7 +195,7 @@ test('opening an article marks it viewed for this device only, and a failure nev
   assert.equal((await fetch(url, { method: 'HEAD', headers: { Cookie: `wd_device=${device}` } })).status, 200);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(marks.length, 2, 'no record for a cookieless client (new random id each time) or a HEAD request');
-  assert.equal(visitsRecorded.length, 3, 'a HEAD request (crawler or link preview) is not a reader visit');
+  assert.equal(visitsRecorded.length, 3, 'a cookieless reader still counts as a visit; a HEAD request does not');
 
   markViewed.mock.mockImplementation(async () => { throw new Error('db down'); });
   assert.equal((await fetch(url, { headers: { Cookie: `wd_device=${device}` } })).status, 200);

@@ -8,12 +8,13 @@ const mongoose = require('mongoose');
 const Article = require('../models/Article');
 const ViewedArticle = require('../models/ViewedArticle');
 const { findFeed, decodeCursor } = require('../models/publicArticleQueries');
+const { assertDev3Uri } = require('../scripts/dev3Guard');
 
 const enabled = process.env.FEED_INTEGRATION === '1' && Boolean(process.env.MONGODB_URI);
 
 test('feed queries page correctly on real MongoDB', { skip: !enabled && 'set FEED_INTEGRATION=1 and MONGODB_URI' }, async t => {
+  assertDev3Uri(process.env.MONGODB_URI); // Before connecting, which already creates collections and indexes.
   await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
-  assert.ok(mongoose.connection.name.endsWith('_dev3'), `refusing to write to ${mongoose.connection.name}`);
   await Article.init(); // Make sure the text and feed indexes exist.
 
   const category = `it-${randomBytes(4).toString('hex')}`;

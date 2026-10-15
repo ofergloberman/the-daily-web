@@ -12,6 +12,8 @@
     "create-user": "node --env-file-if-exists=.env scripts/createUser.js",
     "users": "node --env-file-if-exists=.env scripts/maintainUsers.js",
     "seed:dev3": "node --env-file-if-exists=.env scripts/seedDev3Fixtures.js",
+    "seed:dev3:load": "node --env-file-if-exists=.env scripts/seedDev3Load.js",
+    "explain:dev3": "node --env-file-if-exists=.env scripts/explainDev3Feed.js",
     "seed:demo": "node --env-file-if-exists=.env scripts/seedDemoFixtures.js"
   },
   "dependencies": { "ejs": "^3.1.10", "express": "^5.1.0", "mongoose": "^9.0.0" }
