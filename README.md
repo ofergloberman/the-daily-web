@@ -134,7 +134,7 @@ Future view recording must use an atomic `$inc` with an upsert, rather than read
 
 ### Analytics operations (D4)
 
-- `recordVisit(articleId, publicationId, visitTime)` increments the minute bucket with one atomic `$inc` upsert and retries once if a concurrent first visit wins the unique-index race. `services/visits.js` calls it from the public article page, attributing the view to the article's newest publication event; articles without an event are not counted.
+- `recordVisit(articleId, publicationId, visitTime)` makes two atomic increments, not a transaction, so visits to a popular article never conflict. First it adds one to `Article.totalViews` (the homepage "Most popular" sort) without changing `updatedAt`. Then, if the article exists and a publication was served, it increments the minute bucket with one `$inc` upsert, retrying once if a concurrent first visit wins the unique-index race. `services/visits.js` passes the article's `currentPublication`, the version the reader was served, which the public page reads together with the snapshot. Articles without a publication still count toward popularity but have no bucket. If a failure falls between the two writes, the counters differ by one visit.
 - `getViewSeries(articleId, from, to)` returns views per bucket and every publication with its views in the range. Ranges are at most 366 days. The bucket is a minute up to 6 hours, an hour up to 31 days, and a day (UTC) beyond that, so a graph never exceeds about 750 points. Empty buckets are returned as zero.
 
 ## Agreed roles
@@ -154,7 +154,7 @@ An anonymous guest does not require a User document in the database. Passwords a
 | `/auth` | `GET /` login page, `POST /login`, `POST /logout`, `GET /me` |
 | `/reporter`, `/editor` | Reporter workspace and Editor desk |
 | `/editor` | `GET /?status=&page=` all articles with optional status filter, `GET /articles/:id` review page comparing the published snapshot with the working draft. Editor-only actions return `{ data: { id, status } }` or `{ error, message }`: `POST /articles/:id/approve` (pending to published), `POST /articles/:id/return` with `{ note }` (pending to returned), `PATCH /articles/:id` with content fields (edits the working copy), `DELETE /articles/:id` (removes the article with its comments, events and statistics). Errors: 401 guest, 403 Reporter, 404 unknown id, 409 invalid state, 400 missing note or invalid content |
-| `/analytics` | Editor only: `GET /` page, `GET /articles?q=` search published titles, `GET /articles/:id/views?from=&to=` views per time bucket and publication markers |
+| `/analytics` | Editor only: `GET /` page, `GET /articles?q=&sort=` search published titles (`sort` is `default`, newest first or best match, or `popular`, most `totalViews` first; each result includes `totalViews`; any other value returns 400), `GET /articles/:id/views?from=&to=` views per time bucket and publication markers |
 | `/reporter/articles` | `GET` paginated own articles, `POST` create a private draft |
 | `/reporter/articles/:id/edit` | `GET` edit an owned draft |
 | `/reporter/articles/:id/draft` | `PATCH` save the five working content fields |
