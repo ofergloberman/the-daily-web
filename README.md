@@ -81,6 +81,9 @@ public/analytics.js                Article search and Canvas views graph
 public/analytics.css               Analytics page styles
 scripts/createUser.js              Local account creation
 scripts/verifyTransactions.js      Verify real transaction write and commit
+scripts/seedDev3Fixtures.js        D3 sample feed: 45 published articles and 1 draft (_dev3 database only)
+scripts/seedDev3Load.js            D3 large dataset: 5000 articles and viewed history (_dev3 database only)
+scripts/explainDev3Feed.js         D3 feed query plans, timings and a full paging check
 public/                            CSS, client-side JavaScript, and image files
 test/foundation.test.js            Foundation tests that do not require a running database
 test/auth.test.js                  Password and session flow tests with a simulated database
@@ -170,6 +173,20 @@ npm test
 ```
 
 The standard tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. The comments integration test uses real MongoDB and runs when `COMMENTS_TEST_MONGODB_URI` names a fresh database starting with `the_daily_web_comments_test_`. It verifies validation, visibility, spoofing, authentication, pagination, Editor permissions, exact minute boundaries, rollback after a failed save, cross-article limits, and concurrent submissions. The test drops that temporary database after completion. See [README.comments-api.md](README.comments-api.md) for manual checks.
+
+### Public feed checks (D3)
+
+These write only to a database whose name ends in `_dev3`, checked from `MONGODB_URI` before connecting.
+
+```powershell
+npm run seed:dev3                 # 45 articles for manual checks
+npm run seed:dev3:load            # 5000 articles, 12.5k viewed records (optional count: -- 2000)
+npm run explain:dev3              # indexes, documents read and time for every sort/filter/viewed combination
+npm run explain:dev3 -- --walk    # pages through every feed: each article exactly once, in order
+$env:FEED_INTEGRATION=1; node --env-file=.env --test test/feed.integration.test.js
+```
+
+On 5000 articles every feed page reads 21 documents through an index, with no collection scan. A title search reads every matching article, because a text index cannot return results by date or popularity. The feed indexes now end in `_id`. Mongoose creates new indexes but never drops old ones, so on the shared database drop the three replaced ones once: `publishedAt_-1`, `totalViews_-1` and `published.category_1_publishedAt_-1` (not `syncIndexes()`, which also drops any index another branch created).
 
 ## Git and teamwork
 

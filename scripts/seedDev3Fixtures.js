@@ -2,6 +2,7 @@
 const mongoose = require('mongoose');
 const { randomBytes } = require('node:crypto');
 const { connectDatabase } = require('../config/database');
+const { assertDev3Uri } = require('./dev3Guard');
 const { ROLES, ARTICLE_STATUSES } = require('../config/constants');
 const User = require('../models/User');
 const Article = require('../models/Article');
@@ -10,8 +11,8 @@ const CATEGORIES = ['World', 'Politics', 'Tech', 'Sport', 'Culture'];
 const TOPICS = ['election', 'budget', 'startup', 'final', 'festival', 'climate', 'transit', 'housing', 'museum'];
 
 async function main() {
+  assertDev3Uri(process.env.MONGODB_URI);
   await connectDatabase(process.env.MONGODB_URI);
-  if (!mongoose.connection.name.endsWith('_dev3')) throw new Error(`Refusing to seed database "${mongoose.connection.name}". Use a database name ending in _dev3.`);
   let author = await User.findOne({ username: 'dev3-fixture' });
   if (!author) {
     author = new User({ username: 'dev3-fixture', displayName: 'Fixture Reporter', role: ROLES.REPORTER });
@@ -41,4 +42,4 @@ async function main() {
 main().catch(error => {
   console.error(error.message);
   process.exitCode = 1;
-}).finally(async () => { await mongoose.disconnect(); });
+}).finally(() => mongoose.disconnect().catch(() => {}));
