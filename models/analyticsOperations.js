@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Article = require('./Article');
 const PublicationEvent = require('./PublicationEvent');
 const ViewStatistic = require('./ViewStatistic');
 
@@ -33,7 +34,7 @@ function incrementBucket(filter) {
 }
 
 // Atomic $inc with upsert; a concurrent first visit can make the upsert fail once on the unique index.
-async function recordVisit(articleId, publicationId, visitTime = new Date()) {
+async function recordBucketVisit(articleId, publicationId, visitTime) {
   const filter = { article: articleId, publication: publicationId, minute: minuteStart(visitTime) };
   try {
     await incrementBucket(filter);
@@ -43,9 +44,19 @@ async function recordVisit(articleId, publicationId, visitTime = new Date()) {
   }
 }
 
-async function findLatestPublicationId(articleId) {
-  const event = await PublicationEvent.findOne({ article: articleId }).sort({ publishedAt: -1 }).select('_id').lean();
-  return event?._id ?? null;
+// timestamps: false keeps a page view from changing updatedAt, which orders the Editor desk.
+async function incrementTotalViews(articleId) {
+  const { matchedCount } = await Article.updateOne({ _id: articleId }, { $inc: { totalViews: 1 } }, { timestamps: false });
+  return matchedCount > 0;
+}
+
+// Two atomic increments, not a transaction: one would make every visit to a popular article conflict with the next.
+// A failure between them leaves the two counters one visit apart.
+async function recordVisit(articleId, publicationId, visitTime = new Date()) {
+  const articleExists = await incrementTotalViews(articleId);
+  // A deleted article gets no bucket, so no orphan statistics are left behind.
+  if (!articleExists || !publicationId) return;
+  await recordBucketVisit(articleId, publicationId, visitTime);
 }
 
 // Fills buckets without visits so quiet periods appear as zero instead of being skipped.
@@ -100,6 +111,5 @@ module.exports = {
   chooseUnit,
   fillSeries,
   recordVisit,
-  findLatestPublicationId,
   getViewSeries
 };

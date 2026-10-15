@@ -32,6 +32,9 @@ const articleSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 articleSchema.index({ author: 1, status: 1 });
+// Editor desk: newest-updated first, with and without a status filter (see editorArticleQueries.listForEditor).
+articleSchema.index({ status: 1, updatedAt: -1, _id: -1 });
+articleSchema.index({ updatedAt: -1, _id: -1 });
 // Feed and editor lists sort by (field, _id), so _id is part of each index: MongoDB can then read the
 // first page in order and stop, instead of sorting every matching article in memory.
 articleSchema.index({ publishedAt: -1, _id: -1 });

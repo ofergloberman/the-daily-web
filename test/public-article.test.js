@@ -95,6 +95,23 @@ test('public article page renders only the published snapshot', async t => {
   assert.equal(commentQuery.mock.callCount(), 2, 'private and invalid articles must not query comments');
 });
 
+test('a visit is recorded against the publication the page served', async t => {
+  t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
+  const article = {
+    _id: new mongoose.Types.ObjectId(), currentPublication: new mongoose.Types.ObjectId(),
+    author: { displayName: 'Dana' }, published: { title: 'Counted', body: 'Body.' }
+  };
+  t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
+  const record = t.mock.method(visits, 'recordVisit', async () => {});
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`)).status, 200);
+  assert.equal(record.mock.callCount(), 1);
+  assert.equal(record.mock.calls[0].arguments[0].currentPublication, article.currentPublication);
+  assert.match(PUBLIC_FIELDS, /\bcurrentPublication\b/);
+});
+
 test('article body splits into trimmed non-empty paragraphs', () => {
   assert.deepEqual(paragraphs(' One \r\n\r\nTwo\n  \nThree'), ['One', 'Two', 'Three']);
   assert.deepEqual(paragraphs(undefined), []);
