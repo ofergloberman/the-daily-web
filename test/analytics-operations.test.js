@@ -111,7 +111,12 @@ test('getViewSeries combines buckets, zero gaps and per-publication totals', asy
   const second = new ObjectId();
   const aggregate = t.mock.method(ViewStatistic, 'aggregate', async () => [{
     series: [{ _id: new Date('2026-10-02T14:01:00Z'), views: 4 }, { _id: new Date('2026-10-02T14:03:00Z'), views: 6 }],
-    byPublication: [{ _id: first, views: 4 }, { _id: second, views: 6 }]
+    byPublication: [{ _id: first, views: 4 }, { _id: second, views: 6 }],
+    bucketPublications: [
+      { _id: { bucket: new Date('2026-10-02T14:01:00Z'), publication: first }, views: 4 },
+      { _id: { bucket: new Date('2026-10-02T14:03:00Z'), publication: first }, views: 1 },
+      { _id: { bucket: new Date('2026-10-02T14:03:00Z'), publication: second }, views: 5 }
+    ]
   }]);
   t.mock.method(PublicationEvent, 'find', () => ({
     sort() { return this; }, select() { return this; },
@@ -130,8 +135,13 @@ test('getViewSeries combines buckets, zero gaps and per-publication totals', asy
   const [pipeline] = aggregate.mock.calls[0].arguments;
   assert.deepEqual(pipeline[0].$match, { article, minute: { $gte: from, $lt: to } });
   assert.equal(pipeline[1].$facet.series[0].$group._id.$dateTrunc.unit, 'minute');
+  assert.equal(pipeline[1].$facet.bucketPublications[0].$group._id.bucket.$dateTrunc.unit, 'minute');
+  assert.equal(pipeline[1].$facet.bucketPublications[0].$group._id.publication, '$publication');
   assert.equal(series.unit, 'minute');
   assert.deepEqual(series.points.map(point => point.views), [0, 4, 0, 6, 0]);
+  assert.deepEqual(series.splits, [
+    { time: '2026-10-02T14:03:00.000Z', byPublication: { [first]: 1, [second]: 5 } }
+  ]);
   assert.deepEqual(series.publications, [
     { id: String(first), kind: 'initial', publishedAt: '2026-10-02T14:00:10.000Z', views: 4 },
     { id: String(second), kind: 'update', publishedAt: '2026-10-02T14:03:30.000Z', views: 6 }
@@ -140,12 +150,82 @@ test('getViewSeries combines buckets, zero gaps and per-publication totals', asy
 
 test('getViewSeries lists publications without views in the range as zero', async t => {
   const event = { _id: new ObjectId(), kind: 'initial', publishedAt: new Date('2026-09-01T00:00:00Z') };
-  t.mock.method(ViewStatistic, 'aggregate', async () => [{ series: [], byPublication: [] }]);
+  t.mock.method(ViewStatistic, 'aggregate', async () => [{ series: [], byPublication: [], bucketPublications: [] }]);
   t.mock.method(PublicationEvent, 'find', () => ({ sort() { return this; }, select() { return this; }, async lean() { return [event]; } }));
   const series = await analytics.getViewSeries(new ObjectId(), new Date('2026-10-02T00:00:00Z'), new Date('2026-10-03T00:00:00Z'));
   assert.equal(series.unit, 'hour');
   assert.equal(series.points.length, 24);
   assert.equal(series.publications[0].views, 0);
+  assert.deepEqual(series.splits, []);
+});
+
+// Mocks the aggregate rows ([bucket ISO, publication id, views]) and events ([id, ISO time]) for a one-minute-bucket range.
+async function splitsFor(t, rows, events) {
+  t.mock.method(ViewStatistic, 'aggregate', async () => [{
+    series: [], byPublication: [],
+    bucketPublications: rows.map(([bucket, publication, views]) => ({ _id: { bucket: new Date(bucket), publication }, views }))
+  }]);
+  t.mock.method(PublicationEvent, 'find', () => ({
+    sort() { return this; }, select() { return this; },
+    async lean() { return events.map(([_id, publishedAt]) => ({ _id, kind: 'update', publishedAt: new Date(publishedAt) })); }
+  }));
+  const series = await analytics.getViewSeries(new ObjectId(), new Date('2026-10-02T14:00:00Z'), new Date('2026-10-02T14:05:00Z'));
+  return series.splits;
+}
+
+test('getViewSeries splits a bucket whose publication marker lies strictly inside it', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:02:00Z', first, 2], ['2026-10-02T14:02:00Z', second, 3]],
+    [[first, '2026-10-02T14:00:10Z'], [second, '2026-10-02T14:02:30Z']]);
+  assert.deepEqual(splits, [{ time: '2026-10-02T14:02:00.000Z', byPublication: { [first]: 2, [second]: 3 } }]);
+});
+
+test('getViewSeries gives no split to a bucket without a marker inside', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:01:00Z', first, 2], ['2026-10-02T14:03:00Z', second, 3]],
+    [[first, '2026-10-02T14:00:10Z'], [second, '2026-10-02T14:02:30Z']]);
+  assert.deepEqual(splits, []);
+});
+
+test('getViewSeries gives no split to a marker inside a bucket without views (the client draws it as zero)', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:01:00Z', first, 2], ['2026-10-02T14:03:00Z', second, 3]],
+    [[first, '2026-10-02T14:00:10Z'], [second, '2026-10-02T14:02:30Z']]);
+  assert.ok(!splits.some(split => split.time === '2026-10-02T14:02:00.000Z'));
+});
+
+test('getViewSeries gives no split to a marker exactly on a bucket start', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:01:00Z', first, 2], ['2026-10-02T14:02:00Z', second, 3]],
+    [[first, '2026-10-02T14:00:00Z'], [second, '2026-10-02T14:02:00Z']]);
+  assert.deepEqual(splits, []);
+});
+
+test('getViewSeries keeps all three versions in one split when two markers lie inside a bucket', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const third = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:02:00Z', first, 1], ['2026-10-02T14:02:00Z', second, 2], ['2026-10-02T14:02:00Z', third, 3]],
+    [[first, '2026-10-02T14:00:00Z'], [second, '2026-10-02T14:02:20Z'], [third, '2026-10-02T14:02:40Z']]);
+  assert.deepEqual(splits, [{ time: '2026-10-02T14:02:00.000Z', byPublication: { [first]: 1, [second]: 2, [third]: 3 } }]);
+});
+
+test('getViewSeries sorts splits by time', async t => {
+  const first = new ObjectId();
+  const second = new ObjectId();
+  const splits = await splitsFor(t,
+    [['2026-10-02T14:03:00Z', second, 1], ['2026-10-02T14:01:00Z', first, 1]],
+    [[first, '2026-10-02T14:01:30Z'], [second, '2026-10-02T14:03:30Z']]);
+  assert.deepEqual(splits.map(split => split.time), ['2026-10-02T14:01:00.000Z', '2026-10-02T14:03:00.000Z']);
 });
 
 test('the visit service attributes a view to the publication the reader was served', async t => {

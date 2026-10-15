@@ -403,6 +403,8 @@ test('approve copies the draft snapshot, stamps initial vs update, and is retry-
   assert.equal(updatedArticle.published.title, 'V2');
   assert.equal(db.events.length, 2);
   assert.equal(db.events[1].kind, 'update');
+  assert.equal(updatedArticle.currentPublication, db.events[1]._id);
+  assert.notEqual(String(updatedArticle.currentPublication), String(published.currentPublication));
   assert.equal(new Date(updatedArticle.publishedAt).getTime(), new Date(published.publishedAt).getTime());
 });
 

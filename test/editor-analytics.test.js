@@ -141,11 +141,11 @@ test('analytics article search validates input and returns published titles only
   const find = t.mock.method(Article, 'find', () => queryDouble([{ _id: id, published: { title: 'Budget vote' }, publishedAt: new Date('2026-10-01T00:00:00Z'), score: 1.2 }]));
 
   const found = await (await get('/analytics/articles?q=budget')(tokens.editor)).json();
-  assert.deepEqual(find.mock.calls[0].arguments, [{ published: { $ne: null }, $text: { $search: 'budget' } }]);
+  assert.deepEqual(find.mock.calls[0].arguments, [{ published: { $ne: null }, currentPublication: { $ne: null }, $text: { $search: 'budget' } }]);
   assert.deepEqual(found.data, [{ id: String(id), title: 'Budget vote', publishedAt: '2026-10-01T00:00:00.000Z', totalViews: 0 }]);
 
   await get('/analytics/articles')(tokens.editor);
-  assert.deepEqual(find.mock.calls[1].arguments, [{ published: { $ne: null } }]);
+  assert.deepEqual(find.mock.calls[1].arguments, [{ published: { $ne: null }, currentPublication: { $ne: null } }]);
 
   assert.equal((await get(`/analytics/articles?q=${'x'.repeat(101)}`)(tokens.editor)).status, 400);
   assert.equal((await get('/analytics/articles?q=a&q=b')(tokens.editor)).status, 400);
@@ -188,11 +188,12 @@ test('view series endpoint returns buckets and markers for a published article',
   const publicationId = new ObjectId();
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, async lean() { return { _id: articleId, published: { title: 'Budget vote' } }; } }));
   t.mock.method(ViewStatistic, 'aggregate', async () => [{
-    series: [{ _id: new Date('2026-10-02T14:01:00Z'), views: 3 }], byPublication: [{ _id: publicationId, views: 3 }]
+    series: [{ _id: new Date('2026-10-02T14:01:00Z'), views: 3 }], byPublication: [{ _id: publicationId, views: 3 }],
+    bucketPublications: [{ _id: { bucket: new Date('2026-10-02T14:01:00Z'), publication: publicationId }, views: 3 }]
   }]);
   t.mock.method(PublicationEvent, 'find', () => ({
     sort() { return this; }, select() { return this; },
-    async lean() { return [{ _id: publicationId, kind: 'initial', publishedAt: new Date('2026-10-02T14:00:00Z') }]; }
+    async lean() { return [{ _id: publicationId, kind: 'initial', publishedAt: new Date('2026-10-02T14:01:30Z') }]; }
   }));
 
   const query = 'from=2026-10-02T14:00:00Z&to=2026-10-02T14:03:00Z';
@@ -202,7 +203,8 @@ test('view series endpoint returns buckets and markers for a published article',
   assert.deepEqual(data.article, { id: String(articleId), title: 'Budget vote' });
   assert.equal(data.unit, 'minute');
   assert.deepEqual(data.points.map(point => point.views), [0, 3, 0]);
-  assert.deepEqual(data.publications, [{ id: String(publicationId), kind: 'initial', publishedAt: '2026-10-02T14:00:00.000Z', views: 3 }]);
+  assert.deepEqual(data.splits, [{ time: '2026-10-02T14:01:00.000Z', byPublication: { [publicationId]: 3 } }]);
+  assert.deepEqual(data.publications, [{ id: String(publicationId), kind: 'initial', publishedAt: '2026-10-02T14:01:30.000Z', views: 3 }]);
 });
 
 test('view series endpoint rejects bad ids and ranges and reports unknown articles', async t => {
@@ -220,6 +222,7 @@ test('view series endpoint rejects bad ids and ranges and reports unknown articl
   const missing = await get(`/analytics/articles/${articleId}/views`)(tokens.editor);
   assert.equal(missing.status, 404);
   assert.equal((await missing.json()).error, 'ARTICLE_NOT_FOUND');
+  assert.deepEqual(findOne.mock.calls[0].arguments, [{ _id: String(articleId), published: { $ne: null }, currentPublication: { $ne: null } }]);
 });
 
 test('parseRange defaults to the last seven days', () => {
