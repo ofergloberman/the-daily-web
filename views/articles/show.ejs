@@ -4,9 +4,10 @@
   <%- include('../partials/head') %>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <%- include('../partials/header') %>
   <div class="page-shell">
-    <main class="page-main">
+    <main class="page-main" id="main" tabindex="-1">
       <article class="article-page">
         <header>
           <% if (article.published.category) { %><p class="section-label"><%= article.published.category %></p><% } %>

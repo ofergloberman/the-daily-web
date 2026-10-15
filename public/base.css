@@ -8,6 +8,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--blue-dark); }
 img { max-width: 100%; height: auto; }
 [hidden] { display: none !important; }
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 10; padding: .6rem 1rem; background: var(--white); color: var(--blue-dark); font-weight: 700; }
+.skip-link:focus { top: 1rem; }
+#main:focus { outline: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #76b8e4; outline-offset: 2px; }
 h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap: anywhere; }
@@ -66,12 +69,12 @@ h1, h2, h3 { font-family: Georgia, serif; letter-spacing: -.02em; overflow-wrap:
 .card-title { margin: 0; font-size: 1.4rem; line-height: 1.25; }
 .card-title a { color: var(--ink); text-decoration: none; }
 .card-title a:hover { text-decoration: underline; }
-.card-summary { margin: .5rem 0 0; color: var(--ink); }
+.card-summary { margin: .5rem 0 0; color: var(--ink); overflow-wrap: anywhere; }
 .card-meta { margin: .5rem 0 0; color: var(--muted); font-size: .85rem; }
 
 /* Single article page */
 .article-page header h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.08; }
-.article-summary { margin: 1rem 0 0; color: var(--muted); font-size: 1.15rem; }
+.article-summary { margin: 1rem 0 0; overflow-wrap: anywhere; color: var(--muted); font-size: 1.15rem; }
 .article-meta { margin: 1rem 0 0; color: var(--muted); font-size: .9rem; }
 .article-image { display: block; width: 100%; margin: 2rem 0 0; }
 .article-body { margin-top: 2rem; max-width: 42rem; font-size: 1.08rem; line-height: 1.75; }
