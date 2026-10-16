@@ -42,10 +42,15 @@ function cardJson(article) {
   };
 }
 
+// Express sends HEAD to the GET handler; crawlers and link previews use it and are not readers.
+function isPageView(req) {
+  return req.method === 'GET';
+}
+
 // Visit statistics must never delay or break a public page, whether recordVisit throws or rejects.
 function recordVisitSafely(article, req) {
-  if (req.method !== 'GET') return; // Express also routes HEAD here; link checkers and previews are not readers.
-  Promise.resolve().then(() => visits.recordVisit(article, req))
+  if (!isPageView(req)) return;
+  Promise.resolve().then(() => visits.recordVisit(article))
     .catch(error => console.error('Visit not recorded:', error?.name));
 }
 
@@ -57,7 +62,7 @@ function cameWithDeviceCookie(req) {
 }
 
 function markViewedSafely(article, req) {
-  if (req.method !== 'GET' || !cameWithDeviceCookie(req)) return;
+  if (!isPageView(req) || !cameWithDeviceCookie(req)) return;
   Promise.resolve().then(() => ViewedArticle.markViewed(req.deviceId, article._id))
     .catch(error => console.error('Viewed state not saved:', error?.name));
 }

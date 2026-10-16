@@ -74,11 +74,38 @@ async function aggregateViews(articleId, from, to, unit) {
     {
       $facet: {
         series: [{ $group: { _id: { $dateTrunc: { date: '$minute', unit } }, views: { $sum: '$count' } } }],
-        byPublication: [{ $group: { _id: '$publication', views: { $sum: '$count' } } }]
+        byPublication: [{ $group: { _id: '$publication', views: { $sum: '$count' } } }],
+        bucketPublications: [{
+          $group: {
+            _id: { bucket: { $dateTrunc: { date: '$minute', unit } }, publication: '$publication' },
+            views: { $sum: '$count' }
+          }
+        }]
       }
     }
   ]);
   return result;
+}
+
+// A bucket is stamped at its start, but its views belong to the versions live during it.
+// Only buckets with a publication strictly inside them need the per-version split.
+function buildSplits(rows, events, unit) {
+  const publicationTimes = events.map(event => event.publishedAt.getTime());
+  const byBucket = new Map();
+  rows.forEach(row => {
+    const bucketStart = row._id.bucket.getTime();
+    const viewsByPublication = byBucket.get(bucketStart) ?? {};
+    viewsByPublication[String(row._id.publication)] = row.views;
+    byBucket.set(bucketStart, viewsByPublication);
+  });
+  const splits = [];
+  byBucket.forEach((byPublication, bucketStart) => {
+    const bucketEnd = bucketStart + UNIT_MS[unit];
+    if (publicationTimes.some(time => bucketStart < time && time < bucketEnd)) {
+      splits.push({ time: new Date(bucketStart).toISOString(), byPublication });
+    }
+  });
+  return splits.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
 }
 
 // Views per time bucket plus every publication of the article with the views its version received in the range.
@@ -96,6 +123,7 @@ async function getViewSeries(articleId, from, to) {
     from: from.toISOString(),
     to: to.toISOString(),
     points: fillSeries(viewsByTime, from, to, unit),
+    splits: buildSplits(counts.bucketPublications, events, unit),
     publications: events.map(event => ({
       id: String(event._id),
       kind: event.kind,

@@ -10,6 +10,7 @@ const ViewedArticle = require('../models/ViewedArticle');
 const { PUBLIC_FIELDS } = require('../models/publicArticleQueries');
 const { paragraphs } = require('../controllers/publicArticleController');
 const visits = require('../services/visits');
+const ViewStatistic = require('../models/ViewStatistic');
 
 test('public article page renders only the published snapshot', async t => {
   const author = { _id: new mongoose.Types.ObjectId(), displayName: 'Dana Reporter' };
@@ -108,6 +109,7 @@ test('a visit is recorded against the publication the page served', async t => {
   t.after(() => new Promise(resolve => server.close(resolve)));
   assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`)).status, 200);
   assert.equal(record.mock.callCount(), 1);
+  assert.deepEqual(record.mock.calls[0].arguments, [article]);
   assert.equal(record.mock.calls[0].arguments[0].currentPublication, article.currentPublication);
   assert.match(PUBLIC_FIELDS, /\bcurrentPublication\b/);
 });
@@ -121,19 +123,32 @@ test('a failing recordVisit never breaks the article page', async t => {
   t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
   const article = { _id: new mongoose.Types.ObjectId(), author: { displayName: 'Dana' }, published: { title: 'Still readable', body: 'Body.' } };
   t.mock.method(ViewedArticle, 'markViewed', async () => {});
-  t.mock.method(visits, 'recordVisit', async () => {}); // D4 analytics would otherwise wait for a database.
+  const record = t.mock.method(visits, 'recordVisit', () => { throw new Error('sync failure'); });
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
-  t.mock.method(console, 'error', () => {});
+  const logs = [];
+  let onLogged;
+  t.mock.method(console, 'error', (...args) => { logs.push(args); onLogged(); });
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const url = `http://127.0.0.1:${server.address().port}/articles/${article._id}`;
 
-  t.mock.method(visits, 'recordVisit', () => { throw new Error('sync failure'); });
-  assert.equal((await fetch(url)).status, 200);
-  visits.recordVisit.mock.restore();
-  t.mock.method(visits, 'recordVisit', async () => { throw new Error('async failure'); });
-  assert.equal((await fetch(url)).status, 200);
+  // The failure is logged after the response may already be sent, so wait for the log itself instead of sleeping.
+  async function fetchAndWaitForLog() {
+    const logged = new Promise(resolve => { onLogged = resolve; });
+    const response = await fetch(url);
+    await logged;
+    return response;
+  }
+
+  assert.equal((await fetchAndWaitForLog()).status, 200);
+  assert.equal(record.mock.callCount(), 1);
+  assert.deepEqual(logs, [['Visit not recorded:', 'Error']]);
+  // Swapping the implementation, not re-mocking, keeps the restore at the end of the test clean for later tests.
+  record.mock.mockImplementation(async () => { throw new Error('async failure'); });
+  assert.equal((await fetchAndWaitForLog()).status, 200);
+  assert.equal(record.mock.callCount(), 2);
+  assert.deepEqual(logs, [['Visit not recorded:', 'Error'], ['Visit not recorded:', 'Error']]);
 });
 
 test('comment database errors reach the request error handler', async t => {
@@ -159,7 +174,7 @@ test('opening an article marks it viewed for this device only, and a failure nev
   const visitsRecorded = [];
   t.mock.method(visits, 'recordVisit', async visited => { visitsRecorded.push(String(visited._id)); });
   const marks = [];
-  t.mock.method(ViewedArticle, 'markViewed', async (deviceId, articleId) => { marks.push([deviceId, String(articleId)]); });
+  const markViewed = t.mock.method(ViewedArticle, 'markViewed', async (deviceId, articleId) => { marks.push([deviceId, String(articleId)]); });
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -182,7 +197,95 @@ test('opening an article marks it viewed for this device only, and a failure nev
   assert.equal(marks.length, 2, 'no record for a cookieless client (new random id each time) or a HEAD request');
   assert.equal(visitsRecorded.length, 3, 'a cookieless reader still counts as a visit; a HEAD request does not');
 
-  ViewedArticle.markViewed.mock.restore();
-  t.mock.method(ViewedArticle, 'markViewed', async () => { throw new Error('db down'); });
+  markViewed.mock.mockImplementation(async () => { throw new Error('db down'); });
   assert.equal((await fetch(url, { headers: { Cookie: `wd_device=${device}` } })).status, 200);
+});
+
+// Real services/visits and models/analyticsOperations; only the two database writes are mocked.
+async function serveArticleWithRealVisits(t, article) {
+  t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
+  t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { return []; } }));
+  t.mock.method(ViewedArticle, 'markViewed', async () => {});
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  return `http://127.0.0.1:${server.address().port}/articles/${article._id}`;
+}
+
+// Recording is fire-and-forget, so tests wait on a promise that the mock itself resolves.
+function signal() {
+  let fire;
+  const fired = new Promise(resolve => { fire = resolve; });
+  return { fire, fired };
+}
+
+function publishedArticle(overrides = {}) {
+  return {
+    _id: new mongoose.Types.ObjectId(), currentPublication: new mongoose.Types.ObjectId(),
+    author: { displayName: 'Dana' }, published: { title: 'Counted for real', body: 'Body.' }, ...overrides
+  };
+}
+
+test('a GET visit increments totalViews and the minute bucket of the served publication', async t => {
+  const article = publishedArticle();
+  const articleWritten = signal();
+  const bucketWritten = signal();
+  const articleUpdate = t.mock.method(Article, 'updateOne', async () => { articleWritten.fire(); return { matchedCount: 1 }; });
+  const bucketUpdate = t.mock.method(ViewStatistic, 'updateOne', async () => { bucketWritten.fire(); return {}; });
+  const url = await serveArticleWithRealVisits(t, article);
+
+  assert.equal((await fetch(url)).status, 200);
+  await Promise.all([articleWritten.fired, bucketWritten.fired]);
+
+  assert.deepEqual(articleUpdate.mock.calls[0].arguments, [{ _id: article._id }, { $inc: { totalViews: 1 } }, { timestamps: false }]);
+  const [filter, update, options] = bucketUpdate.mock.calls[0].arguments;
+  assert.ok(filter.minute instanceof Date);
+  assert.deepEqual(filter, { article: article._id, publication: article.currentPublication, minute: filter.minute });
+  assert.deepEqual(update, { $inc: { count: 1 } });
+  assert.deepEqual(options, { upsert: true });
+});
+
+test('a HEAD request records no visit', async t => {
+  const article = publishedArticle();
+  const articleUpdate = t.mock.method(Article, 'updateOne', async () => ({ matchedCount: 1 }));
+  const bucketUpdate = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  const url = await serveArticleWithRealVisits(t, article);
+
+  assert.equal((await fetch(url, { method: 'HEAD' })).status, 200);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(articleUpdate.mock.callCount(), 0);
+  assert.equal(bucketUpdate.mock.callCount(), 0);
+});
+
+for (const failingWrite of ['Article.updateOne', 'ViewStatistic.updateOne']) {
+  test(`when ${failingWrite} rejects the page still renders and only the error name is logged`, async t => {
+    const article = publishedArticle();
+    const failure = new Error('secret connection string');
+    failure.name = 'MongoNetworkError';
+    const logged = signal();
+    t.mock.method(console, 'error', (...args) => logged.fire(args));
+    t.mock.method(Article, 'updateOne', async () => {
+      if (failingWrite === 'Article.updateOne') throw failure;
+      return { matchedCount: 1 };
+    });
+    t.mock.method(ViewStatistic, 'updateOne', async () => { throw failure; });
+    const url = await serveArticleWithRealVisits(t, article);
+
+    assert.equal((await fetch(url)).status, 200);
+    assert.deepEqual(await logged.fired, ['Visit not recorded:', 'MongoNetworkError']);
+  });
+}
+
+test('a published article without currentPublication still counts toward totalViews but writes no bucket', async t => {
+  const article = publishedArticle({ currentPublication: undefined });
+  const articleWritten = signal();
+  const articleUpdate = t.mock.method(Article, 'updateOne', async () => { articleWritten.fire(); return { matchedCount: 1 }; });
+  const bucketUpdate = t.mock.method(ViewStatistic, 'updateOne', async () => ({}));
+  const url = await serveArticleWithRealVisits(t, article);
+
+  assert.equal((await fetch(url)).status, 200);
+  await articleWritten.fired;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(articleUpdate.mock.callCount(), 1);
+  assert.equal(bucketUpdate.mock.callCount(), 0);
 });

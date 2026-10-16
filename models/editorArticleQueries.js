@@ -19,13 +19,16 @@ function findForReview(id) {
   return Article.findById(id).populate('author', 'displayName').lean();
 }
 
+// Analytics needs a publication record: an article without currentPublication has no markers and no bucketed views.
+const HAS_PUBLICATION = Object.freeze({ published: { $ne: null }, currentPublication: { $ne: null } });
+
 function findPublishedForAnalytics(id) {
-  return Article.findOne({ _id: id, published: { $ne: null } }).select('published.title publishedAt').lean();
+  return Article.findOne({ _id: id, ...HAS_PUBLICATION }).select('published.title publishedAt').lean();
 }
 
 // Title word search uses the text index on published.title; without a term the newest articles are returned.
 function searchPublishedTitles(term, sort = 'default') {
-  const published = { published: { $ne: null } };
+  const published = HAS_PUBLICATION;
   const popular = sort === 'popular';
   if (!term) {
     return Article.find(published).select('published.title publishedAt totalViews')

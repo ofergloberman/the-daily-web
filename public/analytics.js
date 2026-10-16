@@ -4,6 +4,7 @@
 
   const MINUTE_MS = 60 * 1000;
   const HOUR_MS = 60 * MINUTE_MS;
+  const UNIT_MS = { minute: MINUTE_MS, hour: HOUR_MS, day: 24 * HOUR_MS };
   const SEARCH_DELAY_MS = 250;
   const X_TICKS = 5;
   const Y_TICKS = 4;
@@ -101,22 +102,64 @@
     }
   }
 
+  function publishedMs(publication) {
+    return Date.parse(publication.publishedAt);
+  }
+
+  // Publications whose marker lies strictly inside the bucket that starts at bucketStartMs.
+  function markersInside(series, bucketStartMs) {
+    const bucketEndMs = bucketStartMs + UNIT_MS[series.unit];
+    return series.publications.filter(publication => bucketStartMs < publishedMs(publication) && publishedMs(publication) < bucketEndMs);
+  }
+
+  // A bucket is stamped at its start, but its views are split between the versions live during it.
+  // Inside a bucket that contains a marker, the line steps vertically at each marker and each earlier version
+  // stays flat until the next marker; the last version's line then continues to the next bucket's point.
+  function splitVertices(bucketStartMs, series, byPublication) {
+    const inside = markersInside(series, bucketStartMs);
+    const liveBefore = series.publications.filter(publication => publishedMs(publication) <= bucketStartMs);
+    const live = liveBefore.length ? liveBefore[liveBefore.length - 1] : null;
+    const owners = [live, ...inside];
+    const vertices = [];
+    owners.forEach((owner, index) => {
+      const views = owner ? byPublication[owner.id] ?? 0 : 0;
+      const startMs = index === 0 ? bucketStartMs : publishedMs(inside[index - 1]);
+      vertices.push({ time: startMs, views });
+      if (index < inside.length) vertices.push({ time: publishedMs(inside[index]), views });
+    });
+    return vertices;
+  }
+
+  function chartVertices(series) {
+    const splitsByTime = new Map((series.splits ?? []).map(split => [Date.parse(split.time), split.byPublication]));
+    const vertices = [];
+    series.points.forEach(point => {
+      const bucketStartMs = Date.parse(point.time);
+      // The server only sends splits for buckets with views; a bucket without a split has zero views per version.
+      if (markersInside(series, bucketStartMs).length) vertices.push(...splitVertices(bucketStartMs, series, splitsByTime.get(bucketStartMs) ?? {}));
+      else vertices.push({ time: bucketStartMs, views: point.views });
+    });
+    return vertices;
+  }
+
   function drawViews(context, plot, scale, series) {
+    const vertices = chartVertices(series);
     context.save();
     context.beginPath();
     context.rect(plot.left, plot.top, plot.width, plot.height);
     context.clip();
     context.beginPath();
-    series.points.forEach((point, index) => {
-      const x = scale.x(Date.parse(point.time));
-      if (index === 0) context.moveTo(x, scale.y(point.views));
-      else context.lineTo(x, scale.y(point.views));
+    vertices.forEach((vertex, index) => {
+      const x = scale.x(vertex.time);
+      const y = scale.y(vertex.views);
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
     });
     context.strokeStyle = COLORS.line;
     context.lineWidth = 2;
     context.stroke();
-    context.lineTo(scale.x(Date.parse(series.points.at(-1).time)), scale.y(0));
-    context.lineTo(scale.x(Date.parse(series.points[0].time)), scale.y(0));
+    context.lineTo(scale.x(vertices[vertices.length - 1].time), scale.y(0));
+    context.lineTo(scale.x(vertices[0].time), scale.y(0));
     context.closePath();
     context.fillStyle = COLORS.fill;
     context.fill();
