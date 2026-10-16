@@ -342,6 +342,28 @@ test('action bodies: non-string note, over-long note, malformed JSON and an over
   await assertServerStillAnswers(send);
 });
 
+test('an unsupported charset or content encoding is a 415 client error, not a server failure, and is not logged as one', async t => {
+  const send = await startServer(t);
+  stubConnected(t);
+  const errors = t.mock.method(console, 'error', () => {});
+  t.mock.method(Article, 'find', () => queryDouble([]));
+  const editUrl = `/editor/articles/${ARTICLE_ID}`;
+  const body = JSON.stringify({ title: 'x' });
+  const base = process.env.APP_ORIGIN;
+  const headers = extra => ({ Origin: base, Accept: JSON_ACCEPT, Cookie: `wd_session=${tokens.editor}`, ...extra });
+
+  const charset = await fetch(base + editUrl, { method: 'PATCH', headers: headers({ 'Content-Type': 'application/json; charset=latin1' }), body });
+  assert.equal(charset.status, 415);
+  assert.deepEqual(await charset.json(), { error: 'BAD_REQUEST', message: 'The request could not be understood.' });
+
+  const encoding = await fetch(base + editUrl, { method: 'PATCH', headers: headers({ 'Content-Type': 'application/json', 'Content-Encoding': 'unknown' }), body });
+  assert.equal(encoding.status, 415);
+  assert.equal((await encoding.json()).error, 'BAD_REQUEST');
+
+  assert.equal(errors.mock.callCount(), 0, 'a client mistake is not a failed request');
+  await assertServerStillAnswers(send);
+});
+
 test('a failing query is a 500 with an error and a message, as JSON for fetch and as a page for a browser', async t => {
   const send = await startServer(t);
   stubConnected(t);

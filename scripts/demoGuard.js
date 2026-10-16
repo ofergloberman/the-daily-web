@@ -9,7 +9,7 @@ const DEMO_DATABASE_SUFFIX = '_demo';
 function assertDemoUri(uri) {
   const name = databaseName(uri);
   if (!name.endsWith(DEMO_DATABASE_SUFFIX)) {
-    throw new Error(`Refusing to seed database "${name || '(none in MONGODB_URI)'}". Use a database name ending in ${DEMO_DATABASE_SUFFIX}.`);
+    throw new Error(`Refusing database "${name || '(none in MONGODB_URI)'}". Use a database name ending in ${DEMO_DATABASE_SUFFIX}.`);
   }
   return name;
 }
