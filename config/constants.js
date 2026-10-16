@@ -26,6 +26,9 @@ const REQUIRED_SUBMIT_FIELDS = Object.freeze(['title', 'summary', 'body', 'categ
 // workflow layer is the only place these limits are checked.
 const DRAFT_FIELD_LIMITS = Object.freeze({ title: 200, summary: 500, body: 50000, category: 80, imageUrl: 2048 });
 
+// Allowed password length, shared by User.setPassword and the demo seed guard.
+const PASSWORD_LENGTH = Object.freeze({ min: 8, max: 128 });
+
 // Longest correction note an Editor can attach when returning an article.
 const EDITOR_NOTE_MAX_LENGTH = 2000;
 
@@ -46,6 +49,6 @@ const ERROR_HTTP_STATUS = Object.freeze({
 
 module.exports = {
   ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS,
-  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH,
+  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, PASSWORD_LENGTH, EDITOR_NOTE_MAX_LENGTH,
   EDITOR_SEARCH_MAX_LENGTH, ERROR_HTTP_STATUS
 };

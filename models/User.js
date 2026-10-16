@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const { randomBytes, scrypt: scryptCallback, timingSafeEqual } = require('node:crypto');
 const { promisify } = require('node:util');
-const { ROLES } = require('../config/constants');
+const { ROLES, PASSWORD_LENGTH } = require('../config/constants');
 const scrypt = promisify(scryptCallback);
 
 const userSchema = new mongoose.Schema({
@@ -17,8 +17,8 @@ const userSchema = new mongoose.Schema({
 userSchema.set('toJSON', { transform(_doc, result) { delete result.passwordHash; return result; } });
 
 userSchema.methods.setPassword = async function (password) {
-  if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
-    throw new Error('Password must be 8 to 128 characters.');
+  if (typeof password !== 'string' || password.length < PASSWORD_LENGTH.min || password.length > PASSWORD_LENGTH.max) {
+    throw new Error(`Password must be ${PASSWORD_LENGTH.min} to ${PASSWORD_LENGTH.max} characters.`);
   }
   const salt = randomBytes(16).toString('hex');
   const hash = await scrypt(password, salt, 64);

@@ -207,18 +207,44 @@ Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-pr
 
 ## Demo dataset
 
-`scripts/seedDemoFixtures.js` (`npm run seed:demo`) fills a database with submission-ready
-demo data: 500 articles spread across every status and category, six Reporter accounts and
-one Editor, guest and registered comments, articles mid-workflow (pending and returned,
-some re-reviewing an already-published update), published articles (some updated several
-times after first publication), and enough minute-bucketed view history to draw the Impact
-Analytics graph and its publication markers. It refuses to run unless `MONGODB_URI` points
-at a database whose name ends in `_demo`, and it is safe to re-run: it deletes and recreates
-only the `demo-*` accounts and their articles each time. Generated account passwords are
-printed once to the console and never stored in a file.
+`scripts/seedDemoFixtures.js` fills a database with submission-ready demo data. Run it with:
+
+```powershell
+npm run seed:demo
+```
+
+**Required environment** (set in your untracked `.env` or the shell; never commit them):
+
+- `MONGODB_URI` must name a database ending in `_demo`, for example
+  `mongodb://127.0.0.1:27018/the_daily_web_demo?replicaSet=rs0`. The name is checked from the URI
+  before anything connects (connecting already writes), so any other database, or a missing name,
+  is refused with a non-zero exit.
+- `DEMO_REPORTER_PASSWORD` is shared by the six Reporter accounts and `DEMO_EDITOR_PASSWORD` is the
+  Editor's. Each must be 8 to 128 characters, otherwise the script exits before connecting. The
+  passwords are hashed with `User.setPassword` and are never printed.
+
+**Accounts:** `demo-editor` and `demo-reporter-1` to `demo-reporter-6`.
+
+**Content (same counts every run):** 520 articles: 70 drafts, 50 returned (each with an editor
+note), 70 pending and 330 published, across 8 categories and the 6 Reporters. Of the published
+articles, 255 were published once, 50 have one update and 25 have three updates (four publications).
+The first 20 returned and first 20 pending articles also have a published version with a different
+draft waiting for review. Published articles carry guest and registered comments in a fixed pattern.
+Each published article has view history from its first publication (between 1 hour and 45 days ago)
+up to now, hourly for the last 7 days and daily before, whose
+rate steps at every publication marker, and `totalViews` equals the sum of its buckets. About 11% of
+all articles are Manchester United / Premier League stories (match reports, transfers, manager,
+injury news and fixtures) filed under `Sport`, including some of the multi-update articles; every
+Reporter writes some of them. The rest is general news. Each article's base view rate is fixed by its
+position in the seed; only the publication dates and the per-bucket view-count jitter are random.
+
+**Re-running:** the script first removes only data owned by `demo-*` accounts (their articles, and
+the comments, publication events, view statistics, viewed-article rows and sessions that belong to
+them), updates the `demo-*` accounts in place with the current env passwords, and recreates the
+content. Other users and articles are never touched.
 
 ## Remaining work
 
 The remaining project requirement is full news-feed interactions. View statistics,
 publication history, the Editor article list, review comparison and actions, the analytics
-graph, and the 500-article demo dataset are in place.
+graph, and the 520-article demo dataset are in place.
