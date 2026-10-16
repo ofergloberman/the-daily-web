@@ -7,6 +7,26 @@ const { deviceIdentity } = require('./middleware/deviceIdentity');
 const { showHome } = require('./controllers/publicArticleController');
 const { formatDate } = require('./helpers/dates');
 const { applicationOrigin, csrfProtection } = require('./middleware/csrf');
+const { sendError } = require('./helpers/sendError');
+
+// Logs only what is needed to trace a failure: never the body, cookies, query string or the error object.
+function logRequestFailure(req, status, error) {
+  console.error('Request failed:', req.method, req.path, status, error.name);
+}
+
+function handleError(error, req, res, next) {
+  if (res.headersSent) return next(error);
+  if (error.type === 'entity.parse.failed') return sendError(req, res, 400, 'INVALID_JSON', 'The request body is not valid JSON.');
+  if (error.type === 'entity.too.large') return sendError(req, res, 413, 'PAYLOAD_TOO_LARGE', 'The request body is too large.');
+  // Express marks an address it cannot decode (for example a broken %zz) with status 400.
+  if (error.status === 400) return sendError(req, res, 400, 'BAD_REQUEST', 'The request could not be understood.');
+  if (mongoose.connection.readyState !== mongoose.STATES.connected) {
+    logRequestFailure(req, 503, error);
+    return sendError(req, res, 503, 'DATABASE_UNAVAILABLE', 'The service is temporarily unavailable. Try again in a moment.');
+  }
+  logRequestFailure(req, 500, error);
+  sendError(req, res, 500, 'INTERNAL_SERVER_ERROR', 'Something went wrong. Try again.');
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -31,13 +51,8 @@ app.use('/editor', requireEditor, require('./routes/editor'));
 app.use('/analytics', requireEditor, require('./routes/analytics'));
 app.use('/articles', require('./routes/articles'));
 app.use('/comments', require('./routes/comments'));
-app.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
-app.use((error, _req, res, _next) => {
-  if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'INVALID_JSON' });
-  if (error.type === 'entity.too.large') return res.status(413).json({ error: 'PAYLOAD_TOO_LARGE' });
-  console.error('Request failed:', error.name);
-  res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
-});
+app.use((req, res) => sendError(req, res, 404, 'NOT_FOUND', 'This page does not exist or is no longer available.'));
+app.use(handleError);
 
 async function start() {
   applicationOrigin();

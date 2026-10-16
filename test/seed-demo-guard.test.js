@@ -1,7 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { assertDemoUri, readDemoPasswords } = require('../scripts/demoGuard');
+const { assertDemoUri, readDemoPasswords, redactConnectionStrings } = require('../scripts/demoGuard');
+
+test('redactConnectionStrings hides every MongoDB connection string in a message', () => {
+  const message = 'Cannot reach mongodb://user:secret@db.example:27017/app_demo?replicaSet=rs0 or mongodb+srv://u:p@cluster.example/x_demo.';
+  const redacted = redactConnectionStrings(message);
+  assert.doesNotMatch(redacted, /mongodb|secret|db\.example|cluster/);
+  assert.equal(redacted.match(/\[connection string hidden\]/g).length, 2);
+  assert.equal(redactConnectionStrings('Refusing to seed database "app".'), 'Refusing to seed database "app".');
+});
 
 const VALID_PASSWORD = 'demo-pass-123';
 

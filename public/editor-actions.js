@@ -5,11 +5,25 @@
   const articleUrl = `/editor/articles/${encodeURIComponent(root.dataset.articleId)}`;
   const DELETE_CONFIRMATION = 'Delete this article together with its comments and view statistics? This cannot be undone.';
   const statusLine = document.getElementById('action-status');
+  const signInLink = document.getElementById('action-signin');
+  const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again as an editor.';
+  const NETWORK_MESSAGE = 'The server could not be reached. Try again.';
+  const REQUEST_FAILED_MESSAGE = 'The request failed. Try again.';
 
-  function showStatus(message, isError = false) {
+  function showStatus(message, isError = false, needsSignIn = false) {
     statusLine.textContent = message;
     statusLine.className = isError ? 'notice notice-error' : 'notice';
     statusLine.hidden = !message;
+    signInLink.hidden = !needsSignIn;
+  }
+
+  // An error that remembers whether the Editor needs the sign-in link.
+  function requestError(message, needsSignIn = false) {
+    return Object.assign(new Error(message), { needsSignIn });
+  }
+
+  function showFailure(error) {
+    showStatus(error instanceof TypeError ? NETWORK_MESSAGE : error.message, true, error.needsSignIn === true);
   }
 
   async function request(method, url, body) {
@@ -19,15 +33,18 @@
       headers: body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
-    if (response.status === 401 || response.status === 403) throw new Error('Your session has ended. Sign in again as an editor.');
+    // A proxy's HTML error page is not JSON; it falls through to the generic message below.
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.message || 'The request failed. Try again.');
+    if (response.status === 401) throw requestError(SESSION_ENDED_MESSAGE, true);
+    if (response.status === 403) throw requestError(payload.message || SESSION_ENDED_MESSAGE);
+    if (!response.ok || payload.data === undefined) throw requestError(payload.message || REQUEST_FAILED_MESSAGE);
     return payload.data;
   }
 
   // The server renders the review page, so reloading its content keeps the status, badges and forms correct.
+  // The review page is HTML whatever Accept says; asking for JSON makes any failure come back as small JSON, not an error page.
   async function refreshReview() {
-    const response = await fetch(articleUrl, { credentials: 'same-origin', headers: { Accept: 'text/html' } });
+    const response = await fetch(articleUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error('The article could not be reloaded.');
     const fresh = new DOMParser().parseFromString(await response.text(), 'text/html').getElementById('review-content');
     if (!fresh) throw new Error('The article could not be reloaded.');
@@ -45,7 +62,7 @@
       await task();
       showStatus(successMessage);
     } catch (error) {
-      showStatus(error instanceof TypeError ? 'The server could not be reached. Try again.' : error.message, true);
+      showFailure(error);
     } finally {
       setBusy(false);
     }

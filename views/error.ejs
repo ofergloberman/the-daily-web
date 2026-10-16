@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('partials/head') %>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <%- include('partials/header') %>
+  <div class="page-shell">
+    <main class="page-main" id="main" tabindex="-1">
+      <section class="empty-state"><h1><%= title %></h1><p><%= message %></p><a href="<%= linkHref %>"><%= linkText %></a></section>
+    </main>
+  </div>
+  <%- include('partials/footer') %>
+</body>
+</html>

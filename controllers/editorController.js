@@ -3,8 +3,10 @@ const { ARTICLE_STATUSES, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH, EDITOR_SEA
 const { listForEditor, findForReview } = require('../models/editorArticleQueries');
 const { parsePage } = require('../helpers/pagination');
 const { formatDate } = require('../helpers/dates');
+const { sendError } = require('../helpers/sendError');
 
 const PAGE_SIZE = 20;
+const DESK_LINK = Object.freeze({ href: '/editor', text: 'Back to the Editor desk' });
 const STATUS_LABELS = Object.freeze({
   [ARTICLE_STATUSES.DRAFT]: 'Draft',
   [ARTICLE_STATUSES.PENDING]: 'Pending approval',
@@ -63,6 +65,10 @@ function sendDeskError(res, { status, error, message }) {
   res.status(status).json({ error, message });
 }
 
+function sendDeskPageError(req, res, { status, error, message }) {
+  sendError(req, res, status, error, message, DESK_LINK);
+}
+
 // The one place that decides how a desk row looks, for the EJS page and the JSON route alike.
 // updatedLabel is the date text as readers see it, so the browser script never formats dates itself.
 function toDeskRow(article) {
@@ -91,7 +97,7 @@ async function loadDeskPage({ q, status, page }) {
 
 async function dashboard(req, res, next) {
   const parsed = parseDeskQuery(req.query);
-  if (parsed.error) return sendDeskError(res, parsed.error);
+  if (parsed.error) return sendDeskPageError(req, res, parsed.error);
   const { q, status, page } = parsed.value;
   try {
     const { rows, hasNext } = await loadDeskPage(parsed.value);

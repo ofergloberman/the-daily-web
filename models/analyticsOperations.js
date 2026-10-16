@@ -8,6 +8,9 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const UNIT_MS = Object.freeze({ minute: MINUTE_MS, hour: HOUR_MS, day: DAY_MS });
 const MAX_RANGE_MS = 366 * DAY_MS;
+// Largest ranges that still give a readable graph per unit: up to six hours by minute, up to 31 days by hour.
+const MINUTE_UNIT_MAX_MS = 6 * HOUR_MS;
+const HOUR_UNIT_MAX_MS = 31 * DAY_MS;
 const DUPLICATE_KEY_ERROR = 11000;
 
 function minuteStart(time) {
@@ -16,8 +19,8 @@ function minuteStart(time) {
 
 // Coarser units keep every graph at or below roughly 750 points.
 function chooseUnit(rangeMs) {
-  if (rangeMs <= 6 * HOUR_MS) return 'minute';
-  if (rangeMs <= 31 * DAY_MS) return 'hour';
+  if (rangeMs <= MINUTE_UNIT_MAX_MS) return 'minute';
+  if (rangeMs <= HOUR_UNIT_MAX_MS) return 'hour';
   return 'day';
 }
 
@@ -134,6 +137,7 @@ async function getViewSeries(articleId, from, to) {
 }
 
 module.exports = {
+  DAY_MS,
   MAX_RANGE_MS,
   minuteStart,
   chooseUnit,

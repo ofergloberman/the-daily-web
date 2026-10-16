@@ -8,11 +8,15 @@
   const list = document.getElementById('desk-list');
   const pager = document.getElementById('desk-pager');
   const status = document.getElementById('desk-status');
-  if (!form || !searchInput || !clearLink || !filter || !list || !pager || !status || !window.fetch) return;
+  const signIn = document.getElementById('desk-signin');
+  if (!form || !searchInput || !clearLink || !filter || !list || !pager || !status || !signIn || !window.fetch) return;
 
   const SEARCH_DELAY_MS = 300;
   const DESK_PATH = '/editor';
   const LIST_PATH = '/editor/articles';
+  const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again as an editor.';
+  const NETWORK_MESSAGE = 'The server could not be reached. Try again.';
+  const LOAD_FAILED_MESSAGE = 'Could not load articles. Try again.';
   // state is what the reader asked for last; generation lets a late response recognise it is out of date.
   let state = readDeskState(location.search);
   let generation = 0;
@@ -34,11 +38,18 @@
     return query ? `${path}?${query}` : path;
   }
 
+  // An error that remembers whether the reader needs the sign-in link.
+  function requestError(message, needsSignIn = false) {
+    return Object.assign(new Error(message), { needsSignIn });
+  }
+
   async function fetchDeskPage(target, signal) {
     const response = await fetch(buildDeskUrl(LIST_PATH, target), { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
+    // A proxy's HTML error page is not JSON; it falls through to the generic message below.
     const body = await response.json().catch(() => ({}));
-    if (response.status === 401 || response.status === 403) throw new Error('Your session has ended. Sign in again as an editor.');
-    if (!response.ok) throw new Error(body.message || 'Could not load articles.');
+    if (response.status === 401) throw requestError(SESSION_ENDED_MESSAGE, true);
+    if (response.status === 403) throw requestError(body.message || SESSION_ENDED_MESSAGE);
+    if (!response.ok || !body.data) throw requestError(body.message || LOAD_FAILED_MESSAGE);
     return body.data;
   }
 
@@ -115,9 +126,14 @@
     });
   }
 
-  function renderStatus(message, isError = false) {
+  function renderStatus(message, isError = false, needsSignIn = false) {
     status.textContent = message;
     status.className = isError ? 'feed-status notice notice-error' : 'feed-status';
+    signIn.hidden = !needsSignIn;
+  }
+
+  function renderFailure(error) {
+    renderStatus(error instanceof TypeError ? NETWORK_MESSAGE : error.message, true, error.needsSignIn === true);
   }
 
   function describeResults(count, page) {
@@ -143,7 +159,7 @@
       renderStatus(describeResults(articles.length, target.page));
     } catch (error) {
       if (error.name === 'AbortError' || current !== generation) return;
-      renderStatus(error instanceof TypeError ? 'The server could not be reached. Try again.' : error.message, true);
+      renderFailure(error);
     } finally {
       if (current === generation) list.removeAttribute('aria-busy');
     }

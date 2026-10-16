@@ -20,12 +20,13 @@ function page({ responses, confirm = true }) {
   const listeners = {};
   const buttons = [{ disabled: false }, { disabled: false }];
   const status = { textContent: '', className: '', hidden: true };
+  const signIn = { hidden: true };
   const note = { value: '' };
   const content = { replacedWith: null, replaceWith(node) { this.replacedWith = node; } };
   const freshContent = { fresh: true };
   const location = { assigned: null, reloaded: false, assign(url) { this.assigned = url; }, reload() { this.reloaded = true; } };
   const root = { dataset: { articleId: 'abc123' }, addEventListener: (type, callback) => { listeners[type] = callback; }, querySelectorAll: () => buttons };
-  const elements = { review: root, 'action-status': status, 'return-note': note, 'review-content': content };
+  const elements = { review: root, 'action-status': status, 'action-signin': signIn, 'return-note': note, 'review-content': content };
   const queue = [...responses];
   const context = {
     TypeError,
@@ -42,7 +43,7 @@ function page({ responses, confirm = true }) {
   };
   vm.runInNewContext(script, context);
   return {
-    calls, status, note, content, freshContent, location, buttons,
+    calls, status, signIn, note, content, freshContent, location, buttons,
     async click(action) {
       listeners.click({ target: { closest: () => ({ dataset: { action } }) } });
       await flush();

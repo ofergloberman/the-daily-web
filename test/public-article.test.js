@@ -11,6 +11,7 @@ const { PUBLIC_FIELDS } = require('../models/publicArticleQueries');
 const { paragraphs } = require('../controllers/publicArticleController');
 const visits = require('../services/visits');
 const ViewStatistic = require('../models/ViewStatistic');
+const { stubConnected } = require('./connectionState');
 
 test('public article page renders only the published snapshot', async t => {
   const author = { _id: new mongoose.Types.ObjectId(), displayName: 'Dana Reporter' };
@@ -158,12 +159,13 @@ test('comment database errors reach the request error handler', async t => {
   t.mock.method(Article, 'findOne', () => ({ select() { return this; }, populate() { return this; }, async lean() { return article; } }));
   t.mock.method(Comment, 'find', () => ({ select() { return this; }, sort() { return this; }, async lean() { throw new Error('private database details'); } }));
   t.mock.method(console, 'error', () => {});
+  stubConnected(t);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/articles/${article._id}`);
   assert.equal(response.status, 500);
-  assert.deepEqual(await response.json(), { error: 'INTERNAL_SERVER_ERROR' });
+  assert.deepEqual(await response.json(), { error: 'INTERNAL_SERVER_ERROR', message: 'Something went wrong. Try again.' });
 });
 
 test('opening an article marks it viewed for this device only, and a failure never breaks the page', async t => {

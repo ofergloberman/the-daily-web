@@ -29,4 +29,11 @@ function readDemoPasswords(env) {
   };
 }
 
-module.exports = { assertDemoUri, readDemoPasswords };
+const CONNECTION_STRING = /mongodb(?:\+srv)?:\/\/\S+/gi;
+
+// A driver message can quote the connection string; scripts print failures through this so the URI never reaches the log.
+function redactConnectionStrings(text) {
+  return String(text).replace(CONNECTION_STRING, '[connection string hidden]');
+}
+
+module.exports = { assertDemoUri, readDemoPasswords, redactConnectionStrings };

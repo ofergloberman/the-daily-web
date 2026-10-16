@@ -74,7 +74,7 @@ function seriesFor(unit, from, to, points, publications, splits) {
 }
 
 async function drawSeries(series) {
-  const els = Object.fromEntries(['article-search', 'article-sort', 'search-status', 'article-results', 'analytics-panel', 'chart-title', 'range', 'chart-status', 'versions-body']
+  const els = Object.fromEntries(['article-search', 'article-sort', 'search-status', 'article-results', 'analytics-panel', 'chart-title', 'range', 'chart-status', 'versions-body', 'analytics-signin']
     .map(id => [id, node()]));
   const { context, calls } = recordingContext();
   els['views-chart'] = Object.assign(node(), {

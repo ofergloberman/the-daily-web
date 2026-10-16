@@ -44,9 +44,10 @@ const ok = (articles, hasNext = false) => reply(200, { data: { articles, page: 1
 function page({ search = '', fetch }) {
   const els = {
     'desk-search': node('form'), 'desk-q': node('input'), 'desk-clear': node('a', 'desk-link desk-clear'),
-    'desk-filter': node('nav'), 'desk-list': node('section'), 'desk-pager': node('nav'), 'desk-status': node('p')
+    'desk-filter': node('nav'), 'desk-list': node('section'), 'desk-pager': node('nav'), 'desk-status': node('p'), 'desk-signin': node('a')
   };
   els['desk-clear'].hidden = true;
+  els['desk-signin'].hidden = true;
   const chips = ['', 'draft', 'pending'].map(value => { const chip = node('a', 'desk-link desk-chip'); chip.dataset.status = value; return chip; });
   els['desk-filter'].querySelectorAll = selector => (selector === '.desk-chip' ? chips : []);
   const timers = [];

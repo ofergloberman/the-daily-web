@@ -6,6 +6,7 @@ const Article = require('../models/Article');
 const Session = require('../models/Session');
 const workflow = require('../models/articleWorkflow');
 const { hashToken } = require('../middleware/auth');
+const { stubConnected } = require('./connectionState');
 
 const { ObjectId } = mongoose.Types;
 const { WorkflowError } = workflow;
@@ -162,11 +163,12 @@ test('workflow errors keep their status and code, including an invalid state', a
 test('an unexpected failure returns a generic 500 without leaking details', async t => {
   const send = await startServer(t);
   t.mock.method(console, 'error', () => {});
+  stubConnected(t);
   mockWorkflow(t, 'approve', async () => { throw new Error('connect ECONNREFUSED db.internal:27017'); });
   const response = await send('POST', `/editor/articles/${new ObjectId()}/approve`, tokens.editor);
   assert.equal(response.status, 500);
   const text = await response.text();
-  assert.deepEqual(JSON.parse(text), { error: 'INTERNAL_SERVER_ERROR' });
+  assert.deepEqual(JSON.parse(text), { error: 'INTERNAL_SERVER_ERROR', message: 'Something went wrong. Try again.' });
   assert.doesNotMatch(text, /ECONNREFUSED|db\.internal/);
 });
 
