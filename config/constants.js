@@ -32,7 +32,7 @@ const PASSWORD_LENGTH = Object.freeze({ min: 8, max: 128 });
 // Longest correction note an Editor can attach when returning an article.
 const EDITOR_NOTE_MAX_LENGTH = 2000;
 
-// Longest title search the Editor desk accepts; also the maxlength of its search box.
+// Longest title search the Editor desk and the analytics article search accept; also the maxlength of both search boxes.
 const EDITOR_SEARCH_MAX_LENGTH = 100;
 
 // HTTP status a controller should respond with for each WorkflowError code.

@@ -42,7 +42,8 @@
   }
 
   // The server renders the review page, so reloading its content keeps the status, badges and forms correct.
-  // The review page is HTML whatever Accept says; asking for JSON makes any failure come back as small JSON, not an error page.
+  // The page is HTML on success and when the article is missing (its own not-found page). Asking for JSON
+  // makes sign-in, permission and server errors (401, 403, 500, 503) come back as small JSON, not an error page.
   async function refreshReview() {
     const response = await fetch(articleUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error('The article could not be reloaded.');
