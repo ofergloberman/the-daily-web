@@ -56,8 +56,9 @@
   .editor-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
   .editor-row-status { align-items: flex-start; }
   .compare-columns { flex-direction: column; }
-  /* Touch targets: about 44px tall for every control on the Editor pages. */
-  .status-filter a, .page-nav a, .back-link, #desk-signin, #action-signin, #analytics-signin { display: inline-flex; align-items: center; min-height: var(--tap-target); }
+  /* Touch targets: about 44px tall for every link, button and field on the Editor pages. Buttons already are (padding). */
+  .status-filter a, .page-nav a, .back-link, .editor-row-title a, .editor-heading a, .review-header a,
+  #desk-signin, #action-signin, #analytics-signin { display: inline-flex; align-items: center; min-height: var(--tap-target); }
   .field { min-height: var(--tap-target); }
   .edit-panel summary { padding: .65rem 0; }
 }

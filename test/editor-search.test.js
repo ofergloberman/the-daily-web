@@ -8,7 +8,8 @@ const { hashToken } = require('../middleware/auth');
 const { EDITOR_SEARCH_MAX_LENGTH } = require('../config/constants');
 const { escapeRegExp } = require('../helpers/escapeRegExp');
 const { editorDeskFilter, listForEditor } = require('../models/editorArticleQueries');
-const { PAGE_SIZE, deskUrl, parseDeskQuery, toDeskRow } = require('../controllers/editorController');
+const { deskUrl, parseDeskQuery, toDeskRow } = require('../controllers/editorController');
+const { EDITOR_DESK_PAGE_SIZE: PAGE_SIZE } = require('../config/constants');
 const { stubConnected } = require('./connectionState');
 
 const { ObjectId } = mongoose.Types;

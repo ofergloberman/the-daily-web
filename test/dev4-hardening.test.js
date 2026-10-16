@@ -641,7 +641,7 @@ test('assertLocalBaseUrl accepts only localhost and 127.0.0.1', () => {
 
 test('the script refuses a non-demo database or a foreign host before it connects', async t => {
   const connect = t.mock.method(mongoose, 'connect', async () => {});
-  await assert.rejects(explainDev4.main([], { MONGODB_URI: 'mongodb://localhost/the_daily_web' }), /Refusing to seed database/);
+  await assert.rejects(explainDev4.main([], { MONGODB_URI: 'mongodb://localhost/the_daily_web' }),   /Refusing database/);
   await assert.rejects(explainDev4.main(['--visits'], { MONGODB_URI: DEMO_URI, DEMO_BASE_URL: 'http://example.com' }), /Refusing to send visits/);
   await assert.rejects(explainDev4.main([], {}), /Refusing/);
   assert.equal(connect.mock.callCount(), 0);

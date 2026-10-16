@@ -4,7 +4,7 @@
 // Exits with a non-zero code on any collection scan, any median above SLOW_QUERY_MS, or any wrong visit count.
 const mongoose = require('mongoose');
 const { SERVER_SELECTION_TIMEOUT_MS } = require('../config/database');
-const { ARTICLE_STATUSES } = require('../config/constants');
+const { ARTICLE_STATUSES, EDITOR_DESK_PAGE_SIZE } = require('../config/constants');
 const { assertDemoUri, redactConnectionStrings } = require('./demoGuard');
 const { summarize, timed } = require('./explainSummary');
 const Article = require('../models/Article');
@@ -15,7 +15,6 @@ const analytics = require('../models/analyticsOperations');
 const {
   SEARCH_SORTS, editorDeskFilter, deskListQuery, listForEditor, findPublishedForAnalytics, searchPublishedTitles
 } = require('../models/editorArticleQueries');
-const { PAGE_SIZE } = require('../controllers/editorController');
 
 const SLOW_QUERY_MS = 200;
 const VISIT_REQUESTS = 1000;
@@ -132,7 +131,7 @@ async function readLastPages() {
   const lastPages = {};
   for (const status of STATUS_FILTERS) {
     const count = await Article.countDocuments(editorDeskFilter({ status, q: '' }));
-    lastPages[status] = Math.max(1, Math.ceil(count / PAGE_SIZE));
+    lastPages[status] = Math.max(1, Math.ceil(count / EDITOR_DESK_PAGE_SIZE));
   }
   return lastPages;
 }
@@ -164,7 +163,7 @@ function deskCases(lastPages) {
   const cases = [];
   for (const status of STATUS_FILTERS) {
     for (const page of new Set([1, lastPages[status]])) {
-      const args = { status, q: '', page, pageSize: PAGE_SIZE };
+      const args = { status, q: '', page, pageSize: EDITOR_DESK_PAGE_SIZE };
       cases.push(findCase(`desk list: ${statusName(status)}, page ${page}`, () => deskListQuery(args), () => listForEditor(args)));
     }
   }
@@ -173,7 +172,7 @@ function deskCases(lastPages) {
 
 function deskSearchCases() {
   return ['', ARTICLE_STATUSES.PENDING].map(status => {
-    const args = { status, q: SEARCH_TERM, page: 1, pageSize: PAGE_SIZE };
+    const args = { status, q: SEARCH_TERM, page: 1, pageSize: EDITOR_DESK_PAGE_SIZE };
     return findCase(`desk search "${SEARCH_TERM}": ${statusName(status)}`, () => deskListQuery(args), () => listForEditor(args));
   });
 }
@@ -275,7 +274,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
 }
 
 module.exports = {
-  SLOW_QUERY_MS, VISIT_REQUESTS, VISIT_CONCURRENCY, DEFAULT_BASE_URL,
+  SLOW_QUERY_MS, VISIT_REQUESTS,
   assertLocalBaseUrl, articleUrl, formatTable, evaluateRows, runWithConcurrency, checkVisitCounts, formatChecks, readUntil, main
 };
 
