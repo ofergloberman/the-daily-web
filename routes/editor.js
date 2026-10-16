@@ -3,6 +3,7 @@ const editor = require('../controllers/editorController');
 const actions = require('../controllers/editorActionsController');
 
 router.get('/', editor.dashboard);
+router.get('/articles', editor.listArticles);
 router.route('/articles/:id')
   .get(editor.reviewArticle)
   .patch(actions.editArticle)

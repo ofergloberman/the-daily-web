@@ -29,6 +29,9 @@ const DRAFT_FIELD_LIMITS = Object.freeze({ title: 200, summary: 500, body: 50000
 // Longest correction note an Editor can attach when returning an article.
 const EDITOR_NOTE_MAX_LENGTH = 2000;
 
+// Longest title search the Editor desk accepts; also the maxlength of its search box.
+const EDITOR_SEARCH_MAX_LENGTH = 100;
+
 // HTTP status a controller should respond with for each WorkflowError code.
 const ERROR_HTTP_STATUS = Object.freeze({
   NOT_FOUND: 404,
@@ -43,5 +46,6 @@ const ERROR_HTTP_STATUS = Object.freeze({
 
 module.exports = {
   ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS,
-  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH, ERROR_HTTP_STATUS
+  DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH,
+  EDITOR_SEARCH_MAX_LENGTH, ERROR_HTTP_STATUS
 };
