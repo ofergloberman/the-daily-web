@@ -10,6 +10,7 @@ const Article = require('../models/Article');
 const ViewedArticle = require('../models/ViewedArticle');
 const { SORTS, CARD_FIELDS, feedFilter, viewedPipeline, deviceHistoryPipeline, historyIsSmaller, findFeed, decodeCursor, encodeCursor } = require('../models/publicArticleQueries');
 const { DEVICES } = require('./seedDev3Load');
+const { summarize, timed } = require('./explainSummary');
 
 const LIMIT = 20;
 const FILTERS = [{}, { category: 'Tech' }, { q: 'election' }, { q: 'election', category: 'Tech' }];
@@ -20,38 +21,12 @@ const VIEWS = [
   { viewed: 'viewed', device: 'light' }
 ];
 
-// Collects stage names, index names and document counts from any explain shape (find or aggregate, any server version).
-function summarize(explain) {
-  const out = { stages: new Set(), indexes: new Set(), docs: 0, keys: 0, collscans: 0 };
-  (function walk(node, key) {
-    if (Array.isArray(node)) return node.forEach(item => walk(item));
-    if (!node || typeof node !== 'object') return;
-    for (const [k, v] of Object.entries(node)) {
-      if (k === 'rejectedPlans' || k === 'allPlansExecution') continue;
-      if (k === 'stage' && typeof v === 'string') { out.stages.add(v); if (v === 'COLLSCAN') out.collscans++; }
-      if (k === 'indexName') out.indexes.add(v);
-      if (k === 'indexesUsed' && Array.isArray(v)) v.forEach(name => out.indexes.add(name));
-      if (k === 'collectionScans' && typeof v === 'number') out.collscans += v;
-      if (k === 'totalDocsExamined' && typeof v === 'number') out.docs += v;
-      if (k === 'totalKeysExamined' && typeof v === 'number') out.keys += v;
-      walk(v, k);
-    }
-  })(explain);
-  return out;
-}
-
 // The same query findFeed would send, so its plan can be explained.
 async function explainFor({ q = '', category = '', sort, viewed, deviceId, after }) {
   const filter = feedFilter({ q, category, sort, after });
   if (viewed === 'all') return Article.find(filter).select(CARD_FIELDS).sort(SORTS[sort].order).limit(LIMIT + 1).explain('executionStats');
   if (viewed === 'viewed' && !q && await historyIsSmaller(deviceId, LIMIT, category)) return ViewedArticle.aggregate(deviceHistoryPipeline({ filter, sort, deviceId, limit: LIMIT })).explain('executionStats');
   return Article.aggregate(viewedPipeline({ filter, sort, viewed, deviceId, limit: LIMIT })).explain('executionStats');
-}
-
-async function timed(fn) {
-  const runs = [];
-  for (let i = 0; i < 3; i++) { const start = performance.now(); await fn(); runs.push(performance.now() - start); }
-  return Math.round(runs.sort((a, b) => a - b)[1]); // median of three
 }
 
 async function explain() {
@@ -127,7 +102,9 @@ async function main() {
   if (!passed) process.exitCode = 1;
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exitCode = 1;
-}).finally(() => mongoose.disconnect().catch(() => {}));
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  }).finally(() => mongoose.disconnect().catch(() => {}));
+}

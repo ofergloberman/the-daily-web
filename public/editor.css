@@ -1,4 +1,5 @@
 /* Editor desk and review pages. Tokens and layout come from base.css. */
+:root { --tap-target: 2.75rem; }
 .editor-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
 .editor-heading h1 { margin: 0 0 .5rem; font-size: 2rem; }
 
@@ -19,7 +20,7 @@
 .status-published { background: #e1f1e7; color: var(--success); }
 .status-returned { background: #f9e8e6; color: var(--error); }
 
-.page-nav { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.5rem; color: var(--muted); font-size: .9rem; }
+.page-nav { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; margin-top: 1.5rem; color: var(--muted); font-size: .9rem; }
 .feed-controls .desk-clear { padding: .75rem 0; }
 
 .review-header h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.15; }
@@ -55,4 +56,8 @@
   .editor-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
   .editor-row-status { align-items: flex-start; }
   .compare-columns { flex-direction: column; }
+  /* Touch targets: about 44px tall for every control on the Editor pages. */
+  .status-filter a, .page-nav a, .back-link, #desk-signin, #action-signin, #analytics-signin { display: inline-flex; align-items: center; min-height: var(--tap-target); }
+  .field { min-height: var(--tap-target); }
+  .edit-panel summary { padding: .65rem 0; }
 }

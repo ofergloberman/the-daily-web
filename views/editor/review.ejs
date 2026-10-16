@@ -7,7 +7,7 @@
   <%- include('../partials/header') %>
   <div class="page-shell">
     <main class="page-main" id="review" data-article-id="<%= article._id %>">
-      <p><a href="/editor">&larr; All articles</a></p>
+      <p><a class="back-link" href="/editor">&larr; All articles</a></p>
       <p id="action-status" role="status" hidden></p>
       <a id="action-signin" href="/auth" hidden>Sign in again</a>
       <div id="review-content">
