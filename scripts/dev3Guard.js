@@ -2,9 +2,10 @@
 // database whose name ends in _dev3, and decide that from the URI before connecting: connecting already
 // writes (the transaction probe, Mongoose collection and index creation).
 function databaseName(uri) {
-  const rest = String(uri || '').replace(/^mongodb(\+srv)?:\/\//, '');
+  // The query string comes first off, so an "@" or "/" inside it can never be mistaken for the host or the name.
+  const rest = String(uri || '').replace(/^mongodb(\+srv)?:\/\//, '').split('?')[0];
   // Credentials percent-encode "@" and "/", so the hosts start after the last "@" and the name follows the first "/".
-  const path = rest.slice(rest.lastIndexOf('@') + 1).split('?')[0];
+  const path = rest.slice(rest.lastIndexOf('@') + 1);
   const slash = path.indexOf('/');
   return slash === -1 ? '' : decodeURIComponent(path.slice(slash + 1));
 }

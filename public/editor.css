@@ -20,6 +20,7 @@
 .status-returned { background: #f9e8e6; color: var(--error); }
 
 .page-nav { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.5rem; color: var(--muted); font-size: .9rem; }
+.feed-controls .desk-clear { padding: .75rem 0; }
 
 .review-header h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.15; }
 .note-text, .compare-value { margin: .3rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }

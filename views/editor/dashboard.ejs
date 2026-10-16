@@ -12,42 +12,55 @@
         <h1>All articles</h1>
         <a href="/analytics">Impact analytics</a>
       </div>
-      <nav class="status-filter" aria-label="Filter by status">
-        <a href="/editor"<% if (!status) { %> aria-current="page"<% } %>>All</a>
-        <% Object.entries(statusLabels).forEach(([value, label]) => { %>
-          <a href="/editor?status=<%= value %>"<% if (status === value) { %> aria-current="page"<% } %>><%= label %></a>
+      <%# Works as a plain GET form without JS; editor-desk.js upgrades it to AJAX. %>
+      <form class="feed-controls" id="desk-search" method="get" action="/editor" role="search">
+        <div class="control"><label class="field-label" for="desk-q">Search titles</label><input class="field" id="desk-q" name="q" type="search" maxlength="<%= searchMaxLength %>" value="<%= q %>" placeholder="Draft or published title"></div>
+        <% if (status) { %><input type="hidden" name="status" value="<%= status %>"><% } %>
+        <button class="primary-button" type="submit">Search</button>
+        <a class="desk-link desk-clear" id="desk-clear" data-clear href="<%= clearUrl %>"<%= q ? '' : ' hidden' %>>Clear search</a>
+      </form>
+      <nav class="status-filter" id="desk-filter" aria-label="Filter by status">
+        <% chips.forEach(chip => { %>
+          <a class="desk-link desk-chip" data-status="<%= chip.status %>" href="<%= chip.url %>"<% if (chip.current) { %> aria-current="page"<% } %>><%= chip.label %></a>
         <% }) %>
       </nav>
-      <% const statusQuery = status ? `status=${status}&` : ''; %>
-      <% if (!articles.length) { %>
-        <section class="empty-state">
-          <h2>No articles found</h2>
-          <p><%= page === 1 ? 'There are no articles with this status yet.' : 'There are no more articles.' %></p>
-          <% if (page > 1) { %><a href="/editor?<%= statusQuery %>page=<%= page - 1 %>">Previous page</a><% } %>
-        </section>
-      <% } else { %>
-        <section class="article-list" aria-label="Articles">
-          <% articles.forEach(article => { %>
-            <article class="editor-row">
-              <div class="editor-row-main">
-                <h2 class="editor-row-title"><a href="/editor/articles/<%= article._id %>"><%= article.draft?.title || article.published?.title || 'Untitled article' %></a></h2>
-                <p class="card-meta">By <%= article.author?.displayName || 'Unknown reporter' %> &middot; Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= formatDate(article.updatedAt) %></time></p>
-              </div>
-              <div class="editor-row-status">
-                <span class="status-badge status-<%= article.status %>"><%= statusLabels[article.status] %></span>
-                <% if (article.published && article.status !== 'published') { %><span class="status-note">Update to a published article</span><% } %>
-              </div>
-            </article>
-          <% }) %>
-        </section>
-        <nav class="page-nav" aria-label="Article pages">
-          <% if (page > 1) { %><a href="/editor?<%= statusQuery %>page=<%= page - 1 %>">Previous page</a><% } %>
-          <span>Page <%= page %></span>
-          <% if (hasNext) { %><a href="/editor?<%= statusQuery %>page=<%= page + 1 %>">Next page</a><% } %>
-        </nav>
-      <% } %>
+      <p class="feed-status" id="desk-status" role="status" aria-live="polite"></p>
+      <section class="article-list" id="desk-list" aria-label="Articles">
+        <% if (!rows.length) { %>
+          <div class="empty-state">
+            <% if (page > 1) { %>
+              <h2>No articles found</h2>
+              <p>There are no more articles.</p>
+            <% } else if (q) { %>
+              <h2>No articles match “<%= q %>”</h2>
+              <p>Try a different part of the title.</p>
+              <a class="desk-link" data-clear href="<%= clearUrl %>">Clear search</a>
+            <% } else { %>
+              <h2>No articles found</h2>
+              <p>There are no articles with this status yet.</p>
+            <% } %>
+          </div>
+        <% } else { rows.forEach(row => { %>
+          <article class="editor-row">
+            <div class="editor-row-main">
+              <h2 class="editor-row-title"><a href="/editor/articles/<%= row.id %>"><%= row.title %></a></h2>
+              <p class="card-meta">By <%= row.authorName %> &middot; Updated <time datetime="<%= row.updatedAt %>"><%= row.updatedLabel %></time></p>
+            </div>
+            <div class="editor-row-status">
+              <span class="status-badge status-<%= row.status %>"><%= row.statusLabel %></span>
+              <% if (row.isPublishedUpdate) { %><span class="status-note">Update to a published article</span><% } %>
+            </div>
+          </article>
+        <% }) } %>
+      </section>
+      <nav class="page-nav" id="desk-pager" aria-label="Article pages"<%= rows.length || page > 1 ? '' : ' hidden' %>>
+        <% if (prevUrl) { %><a class="desk-link" data-page="<%= page - 1 %>" href="<%= prevUrl %>">Previous page</a><% } %>
+        <span>Page <%= page %></span>
+        <% if (nextUrl) { %><a class="desk-link" data-page="<%= page + 1 %>" href="<%= nextUrl %>">Next page</a><% } %>
+      </nav>
     </main>
   </div>
   <%- include('../partials/footer') %>
+  <script src="/editor-desk.js" defer></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 const Article = require('./Article');
+const { escapeRegExp } = require('../helpers/escapeRegExp');
 
 const LIST_FIELDS = 'draft.title published.title status updatedAt author';
 const SEARCH_RESULT_LIMIT = 20;
@@ -6,9 +7,20 @@ const SEARCH_RESULT_LIMIT = 20;
 const SEARCH_SORTS = Object.freeze(['default', 'popular']);
 const POPULAR_ORDER = { totalViews: -1, _id: -1 };
 
+// The desk search matches the draft title (what waits for approval) or the live title, ignoring case.
+// A regex rather than $text: the one text index belongs to public search and finds partial words only this way.
+function editorDeskFilter({ status, q }) {
+  const filter = status ? { status } : {};
+  if (q) {
+    const pattern = { $regex: escapeRegExp(q), $options: 'i' };
+    filter.$or = [{ 'draft.title': pattern }, { 'published.title': pattern }];
+  }
+  return filter;
+}
+
 // Editors see every article regardless of status, so these queries are for Editor routes only.
-async function listForEditor({ status, page, pageSize }) {
-  const rows = await Article.find(status ? { status } : {})
+async function listForEditor({ status, q, page, pageSize }) {
+  const rows = await Article.find(editorDeskFilter({ status, q }))
     .select(LIST_FIELDS).sort({ updatedAt: -1, _id: -1 })
     .skip((page - 1) * pageSize).limit(pageSize + 1)
     .populate('author', 'displayName').lean();
@@ -39,4 +51,4 @@ function searchPublishedTitles(term, sort = 'default') {
     .sort(popular ? POPULAR_ORDER : { score: { $meta: 'textScore' }, _id: -1 }).limit(SEARCH_RESULT_LIMIT).lean();
 }
 
-module.exports = { SEARCH_SORTS, listForEditor, findForReview, findPublishedForAnalytics, searchPublishedTitles };
+module.exports = { SEARCH_SORTS, editorDeskFilter, listForEditor, findForReview, findPublishedForAnalytics, searchPublishedTitles };
