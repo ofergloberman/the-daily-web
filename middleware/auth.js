@@ -1,8 +1,10 @@
 const { createHash } = require('node:crypto');
 const Session = require('../models/Session');
 const { ROLES } = require('../config/constants');
+const { sendError, wantsHtmlPage } = require('../helpers/sendError');
 
 const COOKIE_NAME = 'wd_session';
+const LOGIN_PATH = '/auth';
 
 function readSessionToken(cookieHeader) {
   if (typeof cookieHeader !== 'string') return null;
@@ -30,15 +32,19 @@ async function loadUser(req, res, next) {
   } catch (error) { next(error); }
 }
 
+function sendAuthRequired(req, res) {
+  return sendError(req, res, 401, 'AUTH_REQUIRED', 'Sign in to continue.');
+}
+
 function requireAuth(req, res, next) {
-  if (!req.user) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+  if (!req.user) return sendAuthRequired(req, res);
   next();
 }
 
 function requireRole(role) {
   return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-    if (req.user.role !== role) return res.status(403).json({ error: 'FORBIDDEN' });
+    if (!req.user) return wantsHtmlPage(req) ? res.redirect(303, LOGIN_PATH) : sendAuthRequired(req, res);
+    if (req.user.role !== role) return sendError(req, res, 403, 'FORBIDDEN', 'Your account cannot open this area.');
     next();
   };
 }

@@ -13,6 +13,9 @@
   const Y_TITLE_X = 12;
   const COLORS = { line: '#155e96', fill: 'rgba(21, 94, 150, 0.12)', grid: '#d8e1e8', text: '#53677a', initial: '#2d6044', update: '#c2570c' };
   const KIND_LABELS = { initial: 'First publication', update: 'Approved update' };
+  const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again as an editor.';
+  const NETWORK_MESSAGE = 'The server could not be reached. Try again.';
+  const REQUEST_FAILED_MESSAGE = 'The request failed. Try again.';
   const timeZone = root.dataset.timeZone;
 
   const searchInput = document.getElementById('article-search');
@@ -25,6 +28,7 @@
   const chartStatus = document.getElementById('chart-status');
   const canvas = document.getElementById('views-chart');
   const versionsBody = document.getElementById('versions-body');
+  const signInLink = document.getElementById('analytics-signin');
 
   let selectedId = root.dataset.articleId;
   let searchRequest = 0;
@@ -32,12 +36,28 @@
   let searchTimer;
   let currentSeries = null;
 
+  // An error that remembers whether the Editor needs the sign-in link.
+  function requestError(message, needsSignIn = false) {
+    return Object.assign(new Error(message), { needsSignIn });
+  }
+
   async function getJson(url) {
     const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-    if (response.status === 401 || response.status === 403) throw new Error('Your session has ended. Sign in again as an editor.');
+    // A proxy's HTML error page is not JSON; it falls through to the generic message below.
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.message || 'The request failed. Try again.');
+    if (response.status === 401) throw requestError(SESSION_ENDED_MESSAGE, true);
+    if (response.status === 403) throw requestError(body.message || SESSION_ENDED_MESSAGE);
+    if (!response.ok || body.data === undefined) throw requestError(body.message || REQUEST_FAILED_MESSAGE);
     return body.data;
+  }
+
+  function setStatus(line, message, needsSignIn = false) {
+    line.textContent = message;
+    signInLink.hidden = !needsSignIn;
+  }
+
+  function showFailure(line, error) {
+    setStatus(line, error instanceof TypeError ? NETWORK_MESSAGE : error.message, error.needsSignIn === true);
   }
 
   function formatTime(value, options) {
@@ -272,13 +292,13 @@
     const to = new Date();
     const from = new Date(to.getTime() - Number(range.value) * HOUR_MS);
     panel.hidden = false;
-    chartStatus.textContent = 'Loading views\u2026';
+    setStatus(chartStatus, 'Loading views\u2026');
     try {
       const query = `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
       const series = await getJson(`/analytics/articles/${encodeURIComponent(selectedId)}/views?${query}`);
       if (request === seriesRequest) showSeries(series);
     } catch (error) {
-      if (request === seriesRequest) chartStatus.textContent = error.message;
+      if (request === seriesRequest) showFailure(chartStatus, error);
     }
   }
 
@@ -307,15 +327,15 @@
 
   async function search() {
     const request = ++searchRequest;
-    searchStatus.textContent = 'Searching\u2026';
+    setStatus(searchStatus, 'Searching\u2026');
     try {
       const query = `q=${encodeURIComponent(searchInput.value)}&sort=${encodeURIComponent(sortSelect.value)}`;
       const articles = await getJson(`/analytics/articles?${query}`);
       if (request !== searchRequest) return;
       renderResults(articles);
-      searchStatus.textContent = articles.length ? '' : 'No published articles match.';
+      setStatus(searchStatus, articles.length ? '' : 'No published articles match.');
     } catch (error) {
-      if (request === searchRequest) searchStatus.textContent = error.message;
+      if (request === searchRequest) showFailure(searchStatus, error);
     }
   }
 

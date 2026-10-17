@@ -12,7 +12,7 @@
 const mongoose = require('mongoose');
 const { connectDatabase } = require('../config/database');
 const { ROLES, ARTICLE_STATUSES, DRAFT_FIELD_LIMITS } = require('../config/constants');
-const { assertDemoUri, readDemoPasswords } = require('./demoGuard');
+const { assertDemoUri, readDemoPasswords, redactConnectionStrings } = require('./demoGuard');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const Article = require('../models/Article');
@@ -404,7 +404,7 @@ module.exports = {
 
 if (require.main === module) {
   main().catch(error => {
-    console.error(error.message);
+    console.error(redactConnectionStrings(error.message));
     process.exitCode = 1;
   }).finally(async () => { await mongoose.disconnect(); });
 }

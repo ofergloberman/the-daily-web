@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 const analytics = require('../models/analyticsOperations');
 const { SEARCH_SORTS, findPublishedForAnalytics, searchPublishedTitles } = require('../models/editorArticleQueries');
 const { SITE_TIME_ZONE } = require('../helpers/dates');
+const { EDITOR_SEARCH_MAX_LENGTH } = require('../config/constants');
 
-const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_SEARCH_LENGTH = 100;
+const DEFAULT_RANGE_DAYS = 7;
+const DEFAULT_RANGE_MS = DEFAULT_RANGE_DAYS * analytics.DAY_MS;
+const MAX_RANGE_DAYS = analytics.MAX_RANGE_MS / analytics.DAY_MS;
 
 function fail(res, status, error, message) {
   return res.status(status).json({ error, message });
@@ -16,7 +18,7 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-// Defaults to the last seven days; returns null when the query is not a valid, bounded range.
+// Defaults to the last DEFAULT_RANGE_DAYS days; returns null when the query is not a valid, bounded range.
 function parseRange(query) {
   const to = query.to === undefined ? new Date() : parseDate(query.to);
   if (!to) return null;
@@ -30,15 +32,15 @@ function showPage(req, res) {
   const { article } = req.query;
   res.render('analytics/index', {
     user: req.user, title: 'Impact analytics', styles: ['/editor.css', '/analytics.css'],
-    articleId: mongoose.isObjectIdOrHexString(article) ? article : '', timeZone: SITE_TIME_ZONE
+    articleId: mongoose.isObjectIdOrHexString(article) ? article : '', timeZone: SITE_TIME_ZONE, searchMaxLength: EDITOR_SEARCH_MAX_LENGTH
   });
 }
 
 async function searchArticles(req, res, next) {
   const term = req.query.q ?? '';
   const sort = req.query.sort ?? SEARCH_SORTS[0];
-  if (typeof term !== 'string' || term.length > MAX_SEARCH_LENGTH) {
-    return fail(res, 400, 'INVALID_QUERY', `Search text must be at most ${MAX_SEARCH_LENGTH} characters.`);
+  if (typeof term !== 'string' || term.length > EDITOR_SEARCH_MAX_LENGTH) {
+    return fail(res, 400, 'INVALID_QUERY', `Search text must be at most ${EDITOR_SEARCH_MAX_LENGTH} characters.`);
   }
   if (typeof sort !== 'string' || !SEARCH_SORTS.includes(sort)) {
     return fail(res, 400, 'INVALID_QUERY', `Sort must be one of: ${SEARCH_SORTS.join(', ')}.`);
@@ -54,7 +56,7 @@ async function searchArticles(req, res, next) {
 async function viewSeries(req, res, next) {
   if (!mongoose.isObjectIdOrHexString(req.params.id)) return fail(res, 400, 'INVALID_ARTICLE_ID', 'Invalid article id.');
   const range = parseRange(req.query);
-  if (!range) return fail(res, 400, 'INVALID_RANGE', 'Send valid from and to times (ISO 8601), with from before to and at most 366 days apart.');
+  if (!range) return fail(res, 400, 'INVALID_RANGE', `Send valid from and to times (ISO 8601), with from before to and at most ${MAX_RANGE_DAYS} days apart.`);
   try {
     const article = await findPublishedForAnalytics(req.params.id);
     if (!article) return fail(res, 404, 'ARTICLE_NOT_FOUND', 'No published article with this id.');

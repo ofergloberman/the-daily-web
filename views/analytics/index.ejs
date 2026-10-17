@@ -10,11 +10,12 @@
       <p><a href="/editor">&larr; All articles</a></p>
       <p class="section-label">Impact analytics</p>
       <h1>Article views over time</h1>
+      <a id="analytics-signin" href="/auth" hidden>Sign in again</a>
 
       <section class="analytics-picker" aria-labelledby="picker-title">
         <h2 id="picker-title">Choose an article</h2>
         <label class="field-label" for="article-search">Search published titles</label>
-        <input class="field" id="article-search" type="search" maxlength="100" autocomplete="off" placeholder="Leave empty to see the newest articles">
+        <input class="field" id="article-search" type="search" maxlength="<%= searchMaxLength %>" autocomplete="off" placeholder="Leave empty to see the newest articles">
         <label class="field-label sort-label" for="article-sort">Sort articles by</label>
         <select class="field" id="article-sort">
           <option value="default" selected>Newest first (best match when searching)</option>

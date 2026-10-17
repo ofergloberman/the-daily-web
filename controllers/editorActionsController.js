@@ -10,7 +10,7 @@ function actionHandler(logMessage, run) {
   return async (req, res, next) => {
     try {
       const data = await run(req);
-      console.info(`${logMessage}:`, data.id);
+      console.info(`${logMessage}: editor ${req.user.id}, article ${data.id}`);
       res.json({ data });
     } catch (error) {
       if (!sendWorkflowError(res, error)) next(error);

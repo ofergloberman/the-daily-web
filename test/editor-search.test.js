@@ -9,6 +9,7 @@ const { EDITOR_SEARCH_MAX_LENGTH } = require('../config/constants');
 const { escapeRegExp } = require('../helpers/escapeRegExp');
 const { editorDeskFilter, listForEditor } = require('../models/editorArticleQueries');
 const { PAGE_SIZE, deskUrl, parseDeskQuery, toDeskRow } = require('../controllers/editorController');
+const { stubConnected } = require('./connectionState');
 
 const { ObjectId } = mongoose.Types;
 
@@ -172,11 +173,12 @@ test('GET /editor/articles answers bad input with a 400 JSON error and never que
 
 test('a database failure on the JSON route is a 500 error body and the server keeps answering', async t => {
   const get = await startServer(t);
+  stubConnected(t);
   t.mock.method(console, 'error', () => {});
   const find = t.mock.method(Article, 'find', () => { throw new Error('database down'); });
   const failed = await get('/editor/articles?q=a')(tokens.editor);
   assert.equal(failed.status, 500);
-  assert.deepEqual(await failed.json(), { error: 'INTERNAL_SERVER_ERROR' });
+  assert.deepEqual(await failed.json(), { error: 'INTERNAL_SERVER_ERROR', message: 'Something went wrong. Try again.' });
   find.mock.mockImplementation(() => queryDouble([]));
   assert.equal((await get('/editor/articles')(tokens.editor)).status, 200);
 });

@@ -1,7 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { assertDemoUri, readDemoPasswords } = require('../scripts/demoGuard');
+const { assertDemoUri, readDemoPasswords, redactConnectionStrings } = require('../scripts/demoGuard');
+
+test('redactConnectionStrings hides every MongoDB connection string in a message', () => {
+  const message = 'Cannot reach mongodb://user:secret@db.example:27017/app_demo?replicaSet=rs0 or mongodb+srv://u:p@cluster.example/x_demo.';
+  const redacted = redactConnectionStrings(message);
+  assert.doesNotMatch(redacted, /mongodb|secret|db\.example|cluster/);
+  assert.equal(redacted.match(/\[connection string hidden\]/g).length, 2);
+  assert.equal(redactConnectionStrings('Refusing database "app".'), 'Refusing database "app".');
+});
 
 const VALID_PASSWORD = 'demo-pass-123';
 
@@ -15,7 +23,7 @@ test('assertDemoUri rejects a missing, empty or non-demo database name', () => {
     undefined, '', 'mongodb://h:27017', 'mongodb://h:27017/', 'mongodb://h:27017/?x=1',
     'mongodb://h:27017/prod', 'mongodb://h:27017/app_dev3', 'mongodb://h:27017/demo_prod', 'mongodb://h:27017/the_daily_web'
   ];
-  for (const uri of rejected) assert.throws(() => assertDemoUri(uri), /Refusing to seed database/, String(uri));
+  for (const uri of rejected) assert.throws(() => assertDemoUri(uri), /Refusing database/, String(uri));
 });
 
 test('credentials with a raw "@" or "/" cannot hide the real database name', () => {
@@ -75,7 +83,7 @@ test('startSeed rejects a bad or non-demo URI without connecting', async () => {
   const { startSeed } = require('../scripts/seedDemoFixtures');
   for (const uri of [undefined, '', 'mongodb://h:27017/prod', 'mongodb://h:27017/app_dev3']) {
     const { calls, connect } = countingConnect();
-    await assert.rejects(startSeed({ env: { ...VALID_ENV, MONGODB_URI: uri }, connect }), /Refusing to seed database/, String(uri));
+    await assert.rejects(startSeed({ env: { ...VALID_ENV, MONGODB_URI: uri }, connect }), /Refusing database/, String(uri));
     assert.equal(calls.length, 0, String(uri));
   }
 });

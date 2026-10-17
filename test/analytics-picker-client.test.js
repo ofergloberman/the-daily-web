@@ -24,7 +24,7 @@ function node() {
 }
 
 function page(articles) {
-  const els = Object.fromEntries(['article-search', 'article-sort', 'search-status', 'article-results', 'analytics-panel', 'chart-title', 'range', 'chart-status', 'views-chart', 'versions-body']
+  const els = Object.fromEntries(['article-search', 'article-sort', 'search-status', 'article-results', 'analytics-panel', 'chart-title', 'range', 'chart-status', 'views-chart', 'versions-body', 'analytics-signin']
     .map(id => [id, node()]));
   els.analytics = Object.assign(node(), { dataset: { timeZone: 'UTC', articleId: '' } });
   els['article-sort'].value = 'default';

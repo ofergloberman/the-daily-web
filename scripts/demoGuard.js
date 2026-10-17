@@ -9,7 +9,7 @@ const DEMO_DATABASE_SUFFIX = '_demo';
 function assertDemoUri(uri) {
   const name = databaseName(uri);
   if (!name.endsWith(DEMO_DATABASE_SUFFIX)) {
-    throw new Error(`Refusing to seed database "${name || '(none in MONGODB_URI)'}". Use a database name ending in ${DEMO_DATABASE_SUFFIX}.`);
+    throw new Error(`Refusing database "${name || '(none in MONGODB_URI)'}". Use a database name ending in ${DEMO_DATABASE_SUFFIX}.`);
   }
   return name;
 }
@@ -29,4 +29,11 @@ function readDemoPasswords(env) {
   };
 }
 
-module.exports = { assertDemoUri, readDemoPasswords };
+const CONNECTION_STRING = /mongodb(?:\+srv)?:\/\/\S+/gi;
+
+// A driver message can quote the connection string; scripts print failures through this so the URI never reaches the log.
+function redactConnectionStrings(text) {
+  return String(text).replace(CONNECTION_STRING, '[connection string hidden]');
+}
+
+module.exports = { assertDemoUri, readDemoPasswords, redactConnectionStrings };
