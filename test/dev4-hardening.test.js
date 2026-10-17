@@ -16,6 +16,9 @@ const workflow = require('../models/articleWorkflow');
 const analytics = require('../models/analyticsOperations');
 const visits = require('../services/visits');
 const database = require('../config/database');
+const explainDev4 = require('../scripts/explainDev4');
+const { summarize, timed } = require('../scripts/explainSummary');
+const { deskListQuery, editorDeskFilter } = require('../models/editorArticleQueries');
 const { hashToken } = require('../middleware/auth');
 const { sendError } = require('../helpers/sendError');
 const { EDITOR_SEARCH_MAX_LENGTH, EDITOR_NOTE_MAX_LENGTH } = require('../config/constants');
@@ -621,4 +624,124 @@ test('a JSON answer without data is treated as a failed request, not as success'
   const actions = actionsPage(() => reply(200, {}));
   await actions.click('approve');
   assert.equal(actions.els['action-status'].className, 'notice notice-error');
+});
+
+// ---- scripts/explainDev4.js: the pure helpers and the refusals that happen before any connection -----------
+
+const DEMO_URI = 'mongodb://localhost:27018/the_daily_web_demo?replicaSet=rs0';
+
+test('assertLocalBaseUrl accepts only localhost and 127.0.0.1', () => {
+  assert.equal(explainDev4.assertLocalBaseUrl('http://localhost:3000'), 'http://localhost:3000');
+  assert.equal(explainDev4.assertLocalBaseUrl('http://127.0.0.1:4000/'), 'http://127.0.0.1:4000');
+  for (const refused of ['http://example.com', 'http://localhost.evil.example', 'http://127.0.0.1@evil.example', 'http://192.168.1.5:3000', 'http://[::1]:3000']) {
+    assert.throws(() => explainDev4.assertLocalBaseUrl(refused), /Refusing to send visits/, refused);
+  }
+  assert.throws(() => explainDev4.assertLocalBaseUrl('not a url'), /DEMO_BASE_URL must be a full address/);
+});
+
+test('the script refuses a non-demo database or a foreign host before it connects', async t => {
+  const connect = t.mock.method(mongoose, 'connect', async () => {});
+  await assert.rejects(explainDev4.main([], { MONGODB_URI: 'mongodb://localhost/the_daily_web' }),   /Refusing database/);
+  await assert.rejects(explainDev4.main(['--visits'], { MONGODB_URI: DEMO_URI, DEMO_BASE_URL: 'http://example.com' }), /Refusing to send visits/);
+  await assert.rejects(explainDev4.main([], {}), /Refusing/);
+  assert.equal(connect.mock.callCount(), 0);
+});
+
+test('evaluateRows fails on a collection scan or a median above the limit, and only then', () => {
+  const row = (overrides = {}) => ({ name: 'q', indexes: 'idx', collscans: 0, docs: 20, keys: 20, ms: 5, ...overrides });
+  assert.deepEqual(explainDev4.evaluateRows([row(), row({ ms: explainDev4.SLOW_QUERY_MS })]), { passed: true, problems: [] });
+  const scan = explainDev4.evaluateRows([row({ name: 'scan', collscans: 1 })]);
+  assert.equal(scan.passed, false);
+  assert.deepEqual(scan.problems, ['scan: collection scan']);
+  const slow = explainDev4.evaluateRows([row({ name: 'slow', ms: explainDev4.SLOW_QUERY_MS + 1 })]);
+  assert.equal(slow.passed, false);
+  assert.match(slow.problems[0], /slow: 201 ms is above 200 ms/);
+});
+
+test('formatTable prints a Markdown table with the six documented columns', () => {
+  const lines = explainDev4.formatTable([{ name: 'desk list: all, page 1', indexes: 'updatedAt_-1__id_-1', collscans: 0, docs: 21, keys: 21, ms: 4 }]);
+  assert.deepEqual(lines, [
+    '| query | indexes used | collection scans | docs read | keys read | ms |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| desk list: all, page 1 | updatedAt_-1__id_-1 | 0 | 21 | 21 | 4 |'
+  ]);
+});
+
+test('checkVisitCounts compares the growth of both counters with the expected number', () => {
+  const before = { totalViews: 500, bucketSum: 500 };
+  const exact = explainDev4.checkVisitCounts({ before, after: { totalViews: 1500, bucketSum: 1500 }, expected: explainDev4.VISIT_REQUESTS });
+  assert.ok(exact.every(item => item.ok));
+  const lost = explainDev4.checkVisitCounts({ before, after: { totalViews: 1500, bucketSum: 1499 }, expected: explainDev4.VISIT_REQUESTS });
+  assert.deepEqual(lost.map(item => item.ok), [true, false]);
+  const headOnly = explainDev4.checkVisitCounts({ before, after: { totalViews: 501, bucketSum: 500 }, expected: 0 });
+  assert.deepEqual(headOnly.map(item => item.ok), [false, true]);
+  assert.match(explainDev4.formatChecks(lost).join('\n'), /sum of the view buckets \| 1000 \| 999 \| WRONG/);
+});
+
+test('runWithConcurrency runs every task once and never more than the limit at the same time', async () => {
+  const seen = [];
+  let running = 0;
+  let peak = 0;
+  await explainDev4.runWithConcurrency(120, 7, async index => {
+    running += 1;
+    peak = Math.max(peak, running);
+    await new Promise(resolve => setImmediate(resolve));
+    seen.push(index);
+    running -= 1;
+  });
+  assert.equal(peak, 7);
+  assert.deepEqual([...seen].sort((a, b) => a - b), Array.from({ length: 120 }, (_, index) => index));
+  await explainDev4.runWithConcurrency(0, 7, async () => { throw new Error('must not run'); });
+});
+
+test('readUntil returns as soon as the answer is enough and the last answer when time runs out', async () => {
+  let reads = 0;
+  const growing = await explainDev4.readUntil(async () => ++reads, value => value >= 3, 1000, 1);
+  assert.equal(growing, 3);
+  const stuck = await explainDev4.readUntil(async () => 'same', () => false, 20, 5);
+  assert.equal(stuck, 'same');
+});
+
+test('the visit URL is the public article address of the chosen article', () => {
+  assert.equal(explainDev4.articleUrl('http://localhost:3000', ARTICLE_ID), `http://localhost:3000/articles/${ARTICLE_ID}`);
+});
+
+test('the explain script and the real desk query share one filter and one query builder', t => {
+  const calls = {};
+  t.mock.method(Article, 'find', filter => {
+    calls.filter = filter;
+    return { select() { return this; }, sort() { return this; }, skip(count) { calls.skip = count; return this; }, limit(count) { calls.limit = count; return this; } };
+  });
+  deskListQuery({ status: 'pending', q: 'united', page: 3, pageSize: 20 });
+  assert.deepEqual(calls.filter, editorDeskFilter({ status: 'pending', q: 'united' }));
+  assert.equal(calls.skip, 40);
+  assert.equal(calls.limit, 21);
+});
+
+test('the view series pipeline matches one article and range first, and the bucket filter uses the visit minute', () => {
+  const articleId = new ObjectId();
+  const from = new Date('2026-10-01T00:00:00.000Z');
+  const to = new Date('2026-10-08T00:00:00.000Z');
+  const [match, facet] = analytics.viewSeriesPipeline(articleId, from, to, 'hour');
+  assert.deepEqual(match, { $match: { article: articleId, minute: { $gte: from, $lt: to } } });
+  assert.deepEqual(Object.keys(facet.$facet), ['series', 'byPublication', 'bucketPublications']);
+  const publicationId = new ObjectId();
+  assert.deepEqual(analytics.visitBucketFilter(articleId, publicationId, new Date('2026-10-02T14:03:59.999Z')), {
+    article: articleId, publication: publicationId, minute: new Date('2026-10-02T14:03:00.000Z')
+  });
+});
+
+test('summarize counts collection scans and index use from an explain document, and timed returns the median of three', async () => {
+  const explain = {
+    queryPlanner: { winningPlan: { stage: 'FETCH', inputStage: { stage: 'IXSCAN', indexName: 'status_1_updatedAt_-1__id_-1' } }, rejectedPlans: [{ stage: 'COLLSCAN' }] },
+    executionStats: { totalDocsExamined: 21, totalKeysExamined: 22 }
+  };
+  const plan = summarize(explain);
+  assert.deepEqual([...plan.indexes], ['status_1_updatedAt_-1__id_-1']);
+  assert.deepEqual([plan.collscans, plan.docs, plan.keys], [0, 21, 22]);
+  assert.equal(summarize({ winningPlan: { stage: 'COLLSCAN' } }).collscans, 1);
+
+  let runs = 0;
+  assert.equal(typeof await timed(async () => { runs += 1; }), 'number');
+  assert.equal(runs, 3);
 });

@@ -52,3 +52,27 @@ test('the checks do catch a violation', () => {
   assert.doesNotMatch('<script src="/analytics.js"></script>', OTHER_ORIGIN_RESOURCE);
   assert.doesNotMatch('<link rel="stylesheet" href="/base.css">', OTHER_ORIGIN_RESOURCE);
 });
+
+// Static guard for the responsive audit (DEV4_PLAN Phase E, step 7); the pixel checks themselves are manual.
+test('the Editor and analytics pages keep the layout rules the responsive audit relies on', () => {
+  const editorCss = read(path.join(ROOT, 'public/editor.css'));
+  const analyticsCss = read(path.join(ROOT, 'public/analytics.css'));
+  const mobileRules = editorCss.slice(editorCss.indexOf('@media (max-width: 600px)'));
+  assert.match(editorCss, /\.status-filter\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(editorCss, /\.action-row\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(editorCss, /\.page-nav\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(mobileRules, /\.compare-columns\s*\{\s*flex-direction:\s*column/);
+  assert.match(mobileRules, /\.editor-row\s*\{\s*flex-direction:\s*column/);
+  assert.match(mobileRules, /min-height:\s*var\(--tap-target\)/);
+  assert.match(editorCss, /--tap-target:\s*2\.75rem/);
+  assert.match(editorCss, /\.compare-value[^{]*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(analyticsCss, /\.table-scroll\s*\{\s*overflow-x:\s*auto/);
+  assert.match(analyticsCss, /\.result-button\s*\{[^}]*overflow-wrap:\s*anywhere/);
+});
+
+test('the analytics graph is redrawn when its box changes size and is sharp on high-density screens', () => {
+  const script = read(path.join(ROOT, 'public/analytics.js'));
+  assert.match(script, /new ResizeObserver\(.*drawChart\(currentSeries\)/);
+  assert.match(script, /window\.devicePixelRatio/);
+  assert.match(script, /context\.setTransform\(ratio, 0, 0, ratio, 0, 0\)/);
+});

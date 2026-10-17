@@ -8,7 +8,8 @@ const Session = require('../models/Session');
 const ViewStatistic = require('../models/ViewStatistic');
 const { hashToken } = require('../middleware/auth');
 const { parseRange } = require('../controllers/analyticsController');
-const { compareContent, PAGE_SIZE } = require('../controllers/editorController');
+const { compareContent } = require('../controllers/editorController');
+const { EDITOR_DESK_PAGE_SIZE: PAGE_SIZE } = require('../config/constants');
 
 const { ObjectId } = mongoose.Types;
 

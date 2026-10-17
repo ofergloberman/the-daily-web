@@ -1,11 +1,10 @@
 const mongoose = require('mongoose');
-const { ARTICLE_STATUSES, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH, EDITOR_SEARCH_MAX_LENGTH } = require('../config/constants');
+const { ARTICLE_STATUSES, DRAFT_FIELD_LIMITS, EDITOR_NOTE_MAX_LENGTH, EDITOR_SEARCH_MAX_LENGTH, EDITOR_DESK_PAGE_SIZE } = require('../config/constants');
 const { listForEditor, findForReview } = require('../models/editorArticleQueries');
 const { parsePage } = require('../helpers/pagination');
 const { formatDate } = require('../helpers/dates');
 const { sendError } = require('../helpers/sendError');
 
-const PAGE_SIZE = 20;
 const DESK_LINK = Object.freeze({ href: '/editor', text: 'Back to the Editor desk' });
 const STATUS_LABELS = Object.freeze({
   [ARTICLE_STATUSES.DRAFT]: 'Draft',
@@ -91,7 +90,7 @@ function deskUrl({ q, status, page }) {
 }
 
 async function loadDeskPage({ q, status, page }) {
-  const { articles, hasNext } = await listForEditor({ q, status, page, pageSize: PAGE_SIZE });
+  const { articles, hasNext } = await listForEditor({ q, status, page, pageSize: EDITOR_DESK_PAGE_SIZE });
   return { rows: articles.map(toDeskRow), hasNext };
 }
 
@@ -137,4 +136,4 @@ async function reviewArticle(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { PAGE_SIZE, compareContent, deskUrl, parseDeskQuery, toDeskRow, dashboard, listArticles, reviewArticle };
+module.exports = { compareContent, deskUrl, parseDeskQuery, toDeskRow, dashboard, listArticles, reviewArticle };

@@ -35,6 +35,55 @@ Use `editor` as the final argument for an Editor account. Choose a unique userna
 
 Full local account CRUD is available through `npm run users -- <command>`. See [User maintenance rules and commands](USER_MAINTENANCE.md) for deletion blockers, offline writes, session revocation, safe output and tests. `NEW_USER_PASSWORD` is no longer read.
 
+## Shared demo database (already seeded)
+
+The team shares one MongoDB Atlas database that is already filled with demo data: 520 articles in every status, comments, publication updates and about 45 days of view history. You do not need to install MongoDB or run the seed to work on the app.
+
+- Cluster: `the-daily-web-dev.h02zj78.mongodb.net`
+- Database: `the_daily_web_dev_demo`
+
+### 1. Get access (once)
+Ask Eyal privately (in person or a direct message, never in Git, issues or pull requests) for:
+- an Atlas database username and password for you;
+- the demo sign-in passwords (one for the Editor, one shared by the Reporters).
+
+Your network must also be allowed in Atlas. Send Eyal your public IP address, or ask him to confirm the access list is open for the semester.
+
+*For the database owner:* in Atlas, go to **Database Access → Add New Database User**. Create one user per teammate with **Read and write** on `the_daily_web_dev_demo` only, so any one user can be removed alone. Then add the teammate's IP under **Network Access**.
+
+### 2. Configure your copy
+1. Clone the repository and run `npm ci`.
+2. Copy `.env.example` to `.env` (`cp .env.example .env`, or `Copy-Item .env.example .env` in PowerShell).
+3. In `.env`, set:
+   ```
+   MONGODB_URI=mongodb+srv://<atlas-user>:<atlas-password>@the-daily-web-dev.h02zj78.mongodb.net/the_daily_web_dev_demo
+   ```
+   If your password contains `@ : / ? # [ ] %`, URL-encode those characters (for example, `@` becomes `%40`).
+4. Leave `DEMO_REPORTER_PASSWORD` and `DEMO_EDITOR_PASSWORD` empty. They are only used by `npm run seed:demo`.
+5. `.env` is git-ignored. Check that `git status` never lists it.
+
+### 3. Run and sign in
+1. `npm run dev`, then open http://localhost:3000.
+2. Sign in at `/auth` with one of these accounts:
+
+   | Role | Username | Password |
+   |---|---|---|
+   | Editor | `demo-editor` | Editor demo password (from Eyal) |
+   | Reporter | `demo-reporter-1` … `demo-reporter-6` | Reporter demo password (from Eyal) |
+
+3. To switch role, click **Sign out** in the header first, because `/auth` sends a signed-in user straight to their own area.
+
+### Shared-database etiquette
+- Approving, returning, editing and deleting articles changes the data for **everyone**. Prefer articles you created yourself for destructive tests.
+- Do **not** run `npm run seed:demo` against the shared database without agreeing with the team first, because it replaces the demo data for everyone. Eyal re-seeds it when needed, for example after a schema change or before the defense.
+- For experiments that may break data, use your own database. Change the database name in your `MONGODB_URI` to something ending in `_demo` (for example `the_daily_web_<yourname>_demo`). Set your own `DEMO_*` passwords and run `npm run seed:demo`; the seed refuses any database whose name does not end in `_demo`.
+- `npm test` does not use the database.
+
+### Troubleshooting
+- **"Startup failed. Check PORT, MONGODB_URI…"** or a timeout: your IP is not in the Atlas access list, or the Atlas username or password in `MONGODB_URI` is wrong or not URL-encoded.
+- **"Invalid username or password" on the login page:** check the username (for example `demo-reporter-1`, not just `demo-`) and the demo password. If the passwords were changed, the database was re-seeded with new ones; ask Eyal.
+- **`/auth` keeps sending you to `/editor` or `/reporter`:** you are still signed in; click **Sign out**.
+
 ## Project structure
 
 ```text
@@ -212,6 +261,8 @@ Run `node --test test/weather.test.js test/weather-client.test.js` for mocked-pr
 ```powershell
 npm run seed:demo
 ```
+
+The team's shared Atlas database is already seeded; see [Shared demo database (already seeded)](#shared-demo-database-already-seeded).
 
 **Required environment** (set in your untracked `.env` or the shell; never commit them):
 

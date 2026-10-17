@@ -5,7 +5,7 @@
 .result-list { list-style: none; margin: .75rem 0 0; padding: 0; max-width: 32rem; border: 1px solid var(--line); background: var(--white); }
 .result-list:empty { display: none; }
 .result-list li + li { border-top: 1px solid var(--line); }
-.result-button { display: block; width: 100%; padding: .65rem .8rem; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.result-button { display: block; width: 100%; padding: .65rem .8rem; border: 0; background: none; color: var(--ink); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .result-button:hover { background: var(--pale); }
 .result-button[aria-current="true"] { background: var(--pale); font-weight: 700; }
 

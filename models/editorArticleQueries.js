@@ -18,12 +18,18 @@ function editorDeskFilter({ status, q }) {
   return filter;
 }
 
+const DESK_ORDER = { updatedAt: -1, _id: -1 };
+
+// The desk list before populate and lean; the explain script sends this same query to MongoDB.
+function deskListQuery({ status, q, page, pageSize }) {
+  return Article.find(editorDeskFilter({ status, q }))
+    .select(LIST_FIELDS).sort(DESK_ORDER)
+    .skip((page - 1) * pageSize).limit(pageSize + 1);
+}
+
 // Editors see every article regardless of status, so these queries are for Editor routes only.
 async function listForEditor({ status, q, page, pageSize }) {
-  const rows = await Article.find(editorDeskFilter({ status, q }))
-    .select(LIST_FIELDS).sort({ updatedAt: -1, _id: -1 })
-    .skip((page - 1) * pageSize).limit(pageSize + 1)
-    .populate('author', 'displayName').lean();
+  const rows = await deskListQuery({ status, q, page, pageSize }).populate('author', 'displayName').lean();
   return { articles: rows.slice(0, pageSize), hasNext: rows.length > pageSize };
 }
 
@@ -51,4 +57,4 @@ function searchPublishedTitles(term, sort = 'default') {
     .sort(popular ? POPULAR_ORDER : { score: { $meta: 'textScore' }, _id: -1 }).limit(SEARCH_RESULT_LIMIT).lean();
 }
 
-module.exports = { SEARCH_SORTS, editorDeskFilter, listForEditor, findForReview, findPublishedForAnalytics, searchPublishedTitles };
+module.exports = { SEARCH_SORTS, editorDeskFilter, deskListQuery, listForEditor, findForReview, findPublishedForAnalytics, searchPublishedTitles };

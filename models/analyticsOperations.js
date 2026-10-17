@@ -36,9 +36,13 @@ function incrementBucket(filter) {
   return ViewStatistic.updateOne(filter, { $inc: { count: 1 } }, { upsert: true });
 }
 
+function visitBucketFilter(articleId, publicationId, visitTime) {
+  return { article: articleId, publication: publicationId, minute: minuteStart(visitTime) };
+}
+
 // Atomic $inc with upsert; a concurrent first visit can make the upsert fail once on the unique index.
 async function recordBucketVisit(articleId, publicationId, visitTime) {
-  const filter = { article: articleId, publication: publicationId, minute: minuteStart(visitTime) };
+  const filter = visitBucketFilter(articleId, publicationId, visitTime);
   try {
     await incrementBucket(filter);
   } catch (error) {
@@ -71,8 +75,8 @@ function fillSeries(viewsByTime, from, to, unit) {
   return points;
 }
 
-async function aggregateViews(articleId, from, to, unit) {
-  const [result] = await ViewStatistic.aggregate([
+function viewSeriesPipeline(articleId, from, to, unit) {
+  return [
     { $match: { article: articleId, minute: { $gte: from, $lt: to } } },
     {
       $facet: {
@@ -86,8 +90,17 @@ async function aggregateViews(articleId, from, to, unit) {
         }]
       }
     }
-  ]);
+  ];
+}
+
+async function aggregateViews(articleId, from, to, unit) {
+  const [result] = await ViewStatistic.aggregate(viewSeriesPipeline(articleId, from, to, unit));
   return result;
+}
+
+// Every publication of the article, oldest first; these are the graph markers.
+function publicationEventsQuery(articleId) {
+  return PublicationEvent.find({ article: articleId }).sort({ publishedAt: 1 }).select('kind publishedAt').lean();
 }
 
 // A bucket is stamped at its start, but its views belong to the versions live during it.
@@ -117,7 +130,7 @@ async function getViewSeries(articleId, from, to) {
   const unit = chooseUnit(to.getTime() - from.getTime());
   const [counts, events] = await Promise.all([
     aggregateViews(id, from, to, unit),
-    PublicationEvent.find({ article: id }).sort({ publishedAt: 1 }).select('kind publishedAt').lean()
+    publicationEventsQuery(id)
   ]);
   const viewsByTime = new Map(counts.series.map(bucket => [bucket._id.getTime(), bucket.views]));
   const viewsByPublication = new Map(counts.byPublication.map(row => [String(row._id), row.views]));
@@ -142,6 +155,9 @@ module.exports = {
   minuteStart,
   chooseUnit,
   fillSeries,
+  visitBucketFilter,
+  viewSeriesPipeline,
+  publicationEventsQuery,
   recordVisit,
   getViewSeries
 };

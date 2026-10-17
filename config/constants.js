@@ -35,6 +35,9 @@ const EDITOR_NOTE_MAX_LENGTH = 2000;
 // Longest title search the Editor desk and the analytics article search accept; also the maxlength of both search boxes.
 const EDITOR_SEARCH_MAX_LENGTH = 100;
 
+// Articles per page on the Editor desk, for the page, the JSON route and the explain script.
+const EDITOR_DESK_PAGE_SIZE = 20;
+
 // HTTP status a controller should respond with for each WorkflowError code.
 const ERROR_HTTP_STATUS = Object.freeze({
   NOT_FOUND: 404,
@@ -50,5 +53,5 @@ const ERROR_HTTP_STATUS = Object.freeze({
 module.exports = {
   ROLES, ARTICLE_STATUSES, ARTICLE_TRANSITIONS,
   DRAFT_EDITABLE_FIELDS, REQUIRED_SUBMIT_FIELDS, DRAFT_FIELD_LIMITS, PASSWORD_LENGTH, EDITOR_NOTE_MAX_LENGTH,
-  EDITOR_SEARCH_MAX_LENGTH, ERROR_HTTP_STATUS
+  EDITOR_SEARCH_MAX_LENGTH, EDITOR_DESK_PAGE_SIZE, ERROR_HTTP_STATUS
 };
