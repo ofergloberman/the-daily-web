@@ -1,24 +1,12 @@
 const workflow = require('../models/articleWorkflow');
 const { ARTICLE_STATUSES } = require('../config/constants');
+const { actor, sendWorkflowError } = require('../helpers/workflowResponse');
 
 const PAGE_SIZE = 20;
-
-function actor(req) {
-  return { id: req.user.id, role: req.user.role };
-}
 
 function pageNumber(value) {
   const page = Number(value || 1);
   return Number.isSafeInteger(page) && page > 0 && page <= 10000 ? page : null;
-}
-
-/** Sends the HTTP response for a WorkflowError and returns true, or returns false for any other error. */
-function sendWorkflowError(res, error) {
-  if (!(error instanceof workflow.WorkflowError)) return false;
-  const body = { error: error.code, message: error.message };
-  if (error.latest) body.latest = error.latest;
-  res.status(error.status).json(body);
-  return true;
 }
 
 /** An article is submittable once its required fields are complete AND any imageUrl is a well-formed http(s) address. */
