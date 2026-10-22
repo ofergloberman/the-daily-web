@@ -31,7 +31,7 @@
             <article class="article-row">
               <div class="article-details">
                 <h3><%= article.draft?.title || 'Untitled article' %></h3>
-                <p>Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= article.updatedAt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) %></time></p>
+                <p>Updated <time datetime="<%= article.updatedAt.toISOString() %>"><%= formatDate(article.updatedAt) %></time></p>
                 <% if (article.status === 'returned' && article.editorNote) { %><p class="editor-note">Editor note: <%= article.editorNote %></p><% } %>
               </div>
               <div class="article-action"><span class="status status-<%= article.status %>"><%= { draft: 'Draft', pending: 'Pending review', published: 'Published', returned: 'Returned' }[article.status] || article.status %></span>

@@ -1,10 +1,10 @@
 # The Daily Web
 
-This repository contains an Express and Mongoose MVC foundation, login sessions, a Reporter draft workspace, public article pages, and a comments API with an atomic guest rate limit. Reporters can sign in, create and edit their own drafts, and save changes to MongoDB while writing. Editorial review remains in development.
+This repository contains an Express and Mongoose MVC foundation: login sessions, a Reporter draft workspace with autosave, Editor review (approve, return, edit, delete) with impact analytics, a public home feed and article pages with search/filter/sort/pagination and viewed-history, a comments API with an atomic guest rate limit, and a weather sidebar. Reporters sign in, create and edit their own drafts, and submit them for Editor approval; Editors publish or return submissions and track each article's views.
 
 ## Installation and startup
 
-Node.js 22 or later and a transaction-capable MongoDB replica set or compatible MongoDB Atlas deployment are required for the comments API and atomic guest limiter. A standalone MongoDB server is insufficient. See [Comments API setup and testing](README.comments-api.md) for the local replica-set setup and transaction verification command.
+Node.js 22 or later and a transaction-capable MongoDB replica set or compatible MongoDB Atlas deployment are required for the comments API and atomic guest limiter. A standalone MongoDB server is insufficient. `.env.example` points at a local single-node replica set on port 27018 (for example `mongod --replSet rs0 --port 27018 --dbpath <path>`, then run `rs.initiate()` once via `mongosh`). After setting `MONGODB_URI`, verify transaction support with `node --env-file-if-exists=.env scripts/verifyTransactions.js`.
 
 ```powershell
 npm install
@@ -13,7 +13,7 @@ Copy-Item .env.example .env
 
 Set `MONGODB_URI` in `.env` to your transaction-capable database connection string. The example file uses a local replica set on port 27018. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
 
-Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer; requests missing both are rejected. See [Shared CSRF integration contract](CSRF.md) for forms, AJAX, proxy configuration and D2/D4 review details.
+Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer, and a `Sec-Fetch-Site: cross-site` request is rejected even when Origin matches; requests missing both Origin and Referer are rejected. `middleware/csrf.js` is the single source of truth for this check and needs no separate proxy configuration for same-origin forms or AJAX.
 
 ```powershell
 npm run dev
@@ -33,7 +33,7 @@ npm run create-user -- reporter1 'Reporter One' reporter --offline
 
 Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, where they browse all articles, review submissions, and open `/analytics`. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
 
-Full local account CRUD is available through `npm run users -- <command>`. See [User maintenance rules and commands](USER_MAINTENANCE.md) for deletion blockers, offline writes, session revocation, safe output and tests. `NEW_USER_PASSWORD` is no longer read.
+Full local account CRUD is available through `npm run users -- <command>` (`create`, `read`, `list`, `update`, `reset-password`, `delete`; see `scripts/maintainUsers.js` for exact options). Every command except `read`/`list` requires `--offline` and must be run with the application and seed scripts stopped. Deleting or demoting the last Editor is blocked; `reset-password` and `delete` revoke the user's existing sessions. Passwords are prompted for privately and never logged. `NEW_USER_PASSWORD` is no longer read.
 
 ## Project structure
 
@@ -49,25 +49,40 @@ models/GuestCommentLimit.js        Guest successful-comment timestamps per devic
 models/ViewStatistic.js            View counts per article, minute, and publication
 models/PublicationEvent.js         Initial publication and approved update markers
 routes/                            Authentication, article, and comment routes
+routes/articles.js                  Public feed and article page (search/filter/sort/pagination)
+routes/comments.js                  Comment list, read, create, update, and delete routes
+routes/weather.js                   Public, database-independent weather endpoint
 routes/reporter.js                  Reporter dashboard and draft routes
 routes/editor.js                    Editor desk and article review routes
 routes/analytics.js                 Editor-only analytics page and data routes
 middleware/auth.js                 Cookie session loading and role checks
+middleware/deviceIdentity.js       wd_device cookie for viewed-history and the guest comment limiter
+middleware/csrf.js                 Origin/Referer check for every mutating request
 controllers/authController.js      Login, logout, and account flow
+controllers/publicArticleController.js Home feed, article page, and visit recording
 controllers/reporterController.js  Reporter draft creation, listing, and autosave
 controllers/editorController.js    Editor article list, status filter, and published-versus-draft review
 controllers/editorActionsController.js Editor approve, return, edit and delete requests (call the article workflow)
 controllers/analyticsController.js Analytics article search and view-series responses
 controllers/commentsController.js  Comment request validation and responses
+controllers/weatherController.js   Weather sidebar/homepage endpoint
 services/comments.js               Comment creation and transaction-backed guest limit
+services/weather.js                 Shared weather cache and provider fetch
 config/transactions.js             MongoDB transaction capability check
 controllers/scaffoldController.js  Temporary response for unimplemented endpoints
 models/analyticsOperations.js      Atomic view recording and view series queries
 models/editorArticleQueries.js     Article reads used only by Editor routes
+models/articleWorkflow.js          Article domain rules: transitions, drafts, approval, deletion cascade
+models/publicArticleQueries.js     Public feed query: search, filter, sort, pagination, viewed/not-viewed
+models/ViewedArticle.js            Per-device viewed-article membership (expiring)
 services/visits.js                 Records a visit against the publication a reader received
 helpers/pagination.js              Page number validation
 helpers/workflowResponse.js        Actor shape and JSON error mapping for workflow errors
-views/index.ejs                    Basic server-rendered landing page
+helpers/dates.js                   Asia/Jerusalem date formatting
+helpers/sendError.js               Shared `{ error, message }` JSON error responses
+views/index.ejs                    Home feed (first page server-rendered; AJAX search/filter/sort/pagination)
+views/articles/show.ejs            Public article page
+views/partials/                    Shared header, footer, article card, sidebar, comments, and weather partials
 views/login.ejs                    Login form
 views/editor/                      Editor desk list and review comparison
 views/analytics/                   Impact analytics page
@@ -79,6 +94,11 @@ public/editor.css                  Editor desk and review styles
 public/editor-actions.js           Review page approve, return, edit and delete requests (AJAX)
 public/analytics.js                Article search and Canvas views graph
 public/analytics.css               Analytics page styles
+public/feed.js                     Home feed AJAX search/filter/sort and infinite scroll
+public/base.css                    Shared layout/tokens used by every page
+public/article-comments.js         Article page comment list and posting form
+public/article-comments.css        Article page comment styles
+public/weather.js                  Weather sidebar/homepage polling and rendering
 scripts/createUser.js              Local account creation
 scripts/verifyTransactions.js      Verify real transaction write and commit
 scripts/seedDev3Fixtures.js        D3 sample feed: 45 published articles and 1 draft (_dev3 database only)
@@ -160,10 +180,10 @@ An anonymous guest does not require a User document in the database. Passwords a
 | `/reporter/articles` | `GET` paginated own articles, `POST` create a private draft |
 | `/reporter/articles/:id/edit` | `GET` edit an owned draft |
 | `/reporter/articles/:id/draft` | `PATCH` save the five working content fields |
-| `/articles` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
+| `/articles` | `GET /` the public home feed (search/filter/sort/pagination/viewed), `GET /:id` a published article's page |
 | `/comments` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 
-Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. Reporter routes require the Reporter role; draft reads and updates require ownership, and updates require Draft status. Article write endpoints remain placeholders. `GET /comments?articleId=...` returns up to 20 comments by default, with a maximum `limit` of 50 and a `nextCursor` for the following page. `POST /comments` returns HTTP 201 with `{ comment }`; guests can post three successful comments per rolling minute per device across articles. The fourth returns HTTP 429 with `Retry-After`. Read routes only expose comments on articles with an approved `published` snapshot; PATCH and DELETE require an Editor. See [README.comments-api.md](README.comments-api.md) for setup and manual tests. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400.
+Login accepts a form or JSON body with `username` and `password`. JSON login responds with `{ user, redirectTo }`; form login redirects to the matching area. `GET /auth/me` requires a valid session and returns a public user profile. JSON logout returns HTTP 204. Reporter routes require the Reporter role; draft reads and updates require ownership, and updates require Draft status. `GET /comments?articleId=...` returns up to 20 comments by default, with a maximum `limit` of 50 and a `nextCursor` for the following page. `POST /comments` returns HTTP 201 with `{ comment }`; guests can post three successful comments per rolling minute per device across articles. The fourth returns HTTP 429 with `Retry-After`. Read routes only expose comments on articles with an approved `published` snapshot; PATCH and DELETE require an Editor. An unknown route returns HTTP 404, and malformed JSON returns HTTP 400.
 
 ## Tests
 
@@ -171,7 +191,7 @@ Login accepts a form or JSON body with `username` and `password`. JSON login res
 npm test
 ```
 
-The standard tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. The comments integration test uses real MongoDB and runs when `COMMENTS_TEST_MONGODB_URI` names a fresh database starting with `the_daily_web_comments_test_`. It verifies validation, visibility, spoofing, authentication, pagination, Editor permissions, exact minute boundaries, rollback after a failed save, cross-article limits, and concurrent submissions. The test drops that temporary database after completion. See [README.comments-api.md](README.comments-api.md) for manual checks.
+The standard tests cover schema validation, password hashing, authentication and role checks, analytics buckets and publication markers, separation of draft and published content, page rendering, foundation routes, and malformed JSON handling. The comments integration test uses real MongoDB and runs when `COMMENTS_TEST_MONGODB_URI` names a fresh database starting with `the_daily_web_comments_test_`. It verifies validation, visibility, spoofing, authentication, pagination, Editor permissions, exact minute boundaries, rollback after a failed save, cross-article limits, and concurrent submissions. The test drops that temporary database after completion.
 
 ### Public feed checks (D3)
 
@@ -189,7 +209,7 @@ On 5000 articles every feed page reads 21 documents through an index, with no co
 
 ## Git and teamwork
 
-The local project has not yet been connected to the team's existing GitHub repository. The repository is public, and every team member should be added as a collaborator. `.gitignore` is ready to exclude secrets, dependencies, and temporary files. After cloning the existing repository and transferring this foundation into it, each team member should work on a separate branch and merge changes through Pull Requests.
+The project is hosted on the team's public GitHub repository (github.com/ofergloberman/the-daily-web), with every team member added as a collaborator. `.gitignore` excludes secrets, dependencies, and temporary files. Each team member works on a separate `devN/feature-name` branch (`codex/` for Codex-created branches) and merges changes into `dev` through Pull Requests.
 
 ## Weather service and sidebar
 
@@ -245,6 +265,8 @@ content. Other users and articles are never touched.
 
 ## Remaining work
 
-The remaining project requirement is full news-feed interactions. View statistics,
-publication history, the Editor article list, review comparison and actions, the analytics
-graph, and the 520-article demo dataset are in place.
+The home feed (search, category filter, sort, pagination, viewed/not-viewed), Reporter
+drafting and submission, Editor review/approve/return/edit/delete, impact analytics, comments,
+view statistics, publication history, and the 520-article demo dataset are all in place. `/articles`
+exposes only public reads; a Reporter's writes go through `/reporter` and an Editor's through
+`/editor` instead of a generic REST body on `/articles`.
