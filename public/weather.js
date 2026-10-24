@@ -1,6 +1,11 @@
 (() => {
   const slot = document.getElementById('weather-slot');
   if (!slot) return;
+  const REQUEST_TIMEOUT_MS = 10000;
+  const FAILURE_RETRY_MS = 60000;
+  const MAX_AGE_MS = 15 * 60 * 1000;
+  const MIN_REFRESH_MS = 1000;
+  const MAX_REFRESH_MS = 5 * 60 * 1000;
   const field = name => slot.querySelector(`[data-weather-${name}]`);
   const details = field('details');
   const message = field('message');
@@ -41,8 +46,8 @@
     clearTimeout(refreshTimer);
     const started = performance.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    let nextRefresh = 60000;
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let nextRefresh = FAILURE_RETRY_MS;
     try {
       const response = await fetch('/weather', { cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error('Weather unavailable');
@@ -50,7 +55,7 @@
       const serverTime = Date.parse(response.headers.get('X-Weather-Server-Time'));
       const dataTime = Date.parse(data.dataTime);
       const fetchedAt = Date.parse(data.fetchedAt);
-      const expiresAt = Math.min(Date.parse(data.expiresAt), dataTime + 900000, fetchedAt + 900000);
+      const expiresAt = Math.min(Date.parse(data.expiresAt), dataTime + MAX_AGE_MS, fetchedAt + MAX_AGE_MS);
       // Subtract the whole request duration conservatively, including body transfer.
       const remaining = expiresAt - serverTime - (performance.now() - started);
       if (data.status !== 'available' || !Number.isFinite(remaining) || remaining <= 0
@@ -70,7 +75,7 @@
       expiryTimer = setTimeout(unavailable, remaining);
       details.hidden = false;
       message.hidden = true;
-      nextRefresh = Math.max(1000, Math.min(300000, remaining));
+      nextRefresh = Math.max(MIN_REFRESH_MS, Math.min(MAX_REFRESH_MS, remaining));
     } catch {
       unavailable();
     } finally {

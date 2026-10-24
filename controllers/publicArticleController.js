@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
-const Comment = require('../models/Comment');
-const { publicComment } = require('../services/comments');
+const { listForArticlePage } = require('../services/comments');
 const ViewedArticle = require('../models/ViewedArticle');
 const { SORTS, VIEWED_FILTERS, findPublicById, findFeed, findPublicCategories, decodeCursor } = require('../models/publicArticleQueries');
 const visits = require('../services/visits');
@@ -57,12 +56,8 @@ function recordVisitSafely(article, req) {
 // Viewed membership is a convenience for the feed filter; failing to store it must not break the page.
 // Only browsers that already sent their device cookie are recorded: a cookieless client (crawler, link
 // preview, curl) gets a new random id on every request and could never read that history back.
-function cameWithDeviceCookie(req) {
-  return Boolean(req.deviceId) && (req.headers.cookie || '').split(';').some(part => part.trim() === `wd_device=${req.deviceId}`);
-}
-
 function markViewedSafely(article, req) {
-  if (!isPageView(req) || !cameWithDeviceCookie(req)) return;
+  if (!isPageView(req) || req.deviceIsNew) return;
   Promise.resolve().then(() => ViewedArticle.markViewed(req.deviceId, article._id))
     .catch(error => console.error('Viewed state not saved:', error?.name));
 }
@@ -100,12 +95,10 @@ async function showArticle(req, res, next) {
     if (!article) return notFound(req, res);
     recordVisitSafely(article, req);
     markViewedSafely(article, req);
-    const comments = await Comment.find({ article: article._id })
-      .select('article displayName body createdAt')
-      .sort({ createdAt: 1, _id: 1 }).lean();
+    const comments = await listForArticlePage(article._id);
     res.render('articles/show', {
       user: req.user, article, paragraphs: paragraphs(article.published.body),
-      comments: comments.map(publicComment), styles: ['/article-comments.css'],
+      comments, styles: ['/article-comments.css'],
       title: article.published.title, description: article.published.summary
     });
   } catch (error) { next(error); }

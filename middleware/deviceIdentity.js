@@ -10,8 +10,10 @@ function deviceIdentity(req, res, next) {
 
   if (deviceId && /^[a-f0-9]{64}$/.test(deviceId)) {
     req.deviceId = deviceId;
+    req.deviceIsNew = false;
   } else {
     req.deviceId = randomBytes(32).toString('hex');
+    req.deviceIsNew = true;
     res.cookie(COOKIE_NAME, req.deviceId, {
       httpOnly: true, sameSite: 'lax', path: '/',
       maxAge: COOKIE_AGE_MS, secure: process.env.NODE_ENV === 'production'

@@ -21,7 +21,7 @@
           <% }) %>
         </div>
       </article>
-      <section class="comments-slot" id="comments" data-article-id="<%= article._id %>" aria-label="Comments">
+      <section class="comments-slot" id="comments" data-article-id="<%= article._id %>" data-time-zone="<%= siteTimeZone %>" aria-label="Comments">
         <%- include('../partials/comments') %>
       </section>
     </main>

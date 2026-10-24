@@ -1,23 +1,25 @@
 const workflow = require('../models/articleWorkflow');
 const { ARTICLE_STATUSES } = require('../config/constants');
+const { actor, sendWorkflowError } = require('../helpers/workflowResponse');
+const { parsePage } = require('../helpers/pagination');
+const { sendError } = require('../helpers/sendError');
 
 const PAGE_SIZE = 20;
+const REPORTER_LINK = Object.freeze({ href: '/reporter', text: 'Back to my articles' });
 
-function actor(req) {
-  return { id: req.user.id, role: req.user.role };
+// An empty ?page= means the first page, as it did before the shared helper was used.
+function requestedPage(req) {
+  return parsePage(req.query.page || undefined);
 }
 
-function pageNumber(value) {
-  const page = Number(value || 1);
-  return Number.isSafeInteger(page) && page > 0 && page <= 10000 ? page : null;
+function statusFilter(req) {
+  return typeof req.query.status === 'string' ? req.query.status : '';
 }
 
-/** Sends the HTTP response for a WorkflowError and returns true, or returns false for any other error. */
-function sendWorkflowError(res, error) {
+/** Page requests show an error page (JSON for fetch callers) for a WorkflowError; returns false for any other error. */
+function sendWorkflowPageError(req, res, error) {
   if (!(error instanceof workflow.WorkflowError)) return false;
-  const body = { error: error.code, message: error.message };
-  if (error.latest) body.latest = error.latest;
-  res.status(error.status).json(body);
+  sendError(req, res, error.status, error.code, error.message, REPORTER_LINK);
   return true;
 }
 
@@ -42,29 +44,24 @@ function publicArticle(article) {
 }
 
 async function dashboard(req, res, next) {
-  const page = pageNumber(req.query.page);
-  if (!page) return res.status(400).json({ error: 'INVALID_PAGE' });
-  const status = typeof req.query.status === 'string' ? req.query.status : '';
+  const page = requestedPage(req);
+  if (!page) return sendError(req, res, 400, 'INVALID_PAGE', 'That page number is not valid.', REPORTER_LINK);
+  const status = statusFilter(req);
   try {
-    const articles = await workflow.listOwnArticlesQuery(actor(req), status ? { status } : {})
-      .select('draft.title status editorNote updatedAt').sort({ updatedAt: -1, _id: -1 })
-      .skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1).lean();
-    res.render('reporterDashboard', { user: req.user, articles: articles.slice(0, PAGE_SIZE), page, hasNext: articles.length > PAGE_SIZE, status });
+    const { articles, hasNext } = await workflow.listOwnArticlesPage(actor(req), { status, page, pageSize: PAGE_SIZE });
+    res.render('reporterDashboard', { user: req.user, articles, page, hasNext, status });
   } catch (error) {
-    if (sendWorkflowError(res, error)) return;
+    if (sendWorkflowPageError(req, res, error)) return;
     next(error);
   }
 }
 
 async function listArticles(req, res, next) {
-  const page = pageNumber(req.query.page);
+  const page = requestedPage(req);
   if (!page) return res.status(400).json({ error: 'INVALID_PAGE' });
-  const status = typeof req.query.status === 'string' ? req.query.status : '';
   try {
-    const articles = await workflow.listOwnArticlesQuery(actor(req), status ? { status } : {})
-      .select('draft.title status editorNote updatedAt').sort({ updatedAt: -1, _id: -1 })
-      .skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1).lean();
-    res.json({ page, hasNext: articles.length > PAGE_SIZE, articles: articles.slice(0, PAGE_SIZE).map(article => ({
+    const { articles, hasNext } = await workflow.listOwnArticlesPage(actor(req), { status: statusFilter(req), page, pageSize: PAGE_SIZE });
+    res.json({ page, hasNext, articles: articles.map(article => ({
       id: String(article._id), title: article.draft?.title || 'Untitled article',
       status: article.status, editorNote: article.editorNote, updatedAt: article.updatedAt
     })) });
@@ -93,7 +90,7 @@ async function editArticle(req, res, next) {
     const locked = article.status === ARTICLE_STATUSES.PENDING;
     res.render('reporterEditor', { user: req.user, article, locked, canSubmit: !locked && canSubmit(article) });
   } catch (error) {
-    if (sendWorkflowError(res, error)) return;
+    if (sendWorkflowPageError(req, res, error)) return;
     next(error);
   }
 }

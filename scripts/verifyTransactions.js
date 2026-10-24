@@ -9,7 +9,7 @@ const { verifyTransactions } = require('../config/transactions');
     console.log('MongoDB transaction write and commit verified.');
   } catch (error) {
     // Connection errors may contain credentials or private deployment addresses.
-    console.error(`Transaction verification failed (${error.name}). Check MongoDB availability, replica-set configuration and database permissions. See README.comments-api.md.`);
+    console.error(`Transaction verification failed (${error.name}). Check MongoDB availability, replica-set configuration and database permissions. See the README, "Installation and startup".`);
     process.exitCode = 1;
   } finally {
     await mongoose.disconnect();

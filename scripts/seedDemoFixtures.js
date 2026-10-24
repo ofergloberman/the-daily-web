@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const { connectDatabase } = require('../config/database');
 const { ROLES, ARTICLE_STATUSES, DRAFT_FIELD_LIMITS } = require('../config/constants');
 const { assertDemoUri, readDemoPasswords, redactConnectionStrings } = require('./demoGuard');
+const { escapeRegExp } = require('../helpers/escapeRegExp');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const Article = require('../models/Article');
@@ -99,7 +100,9 @@ const DAYS_BACK = 45;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
-const RECENT_WINDOW_DAYS = 7;
+// Matches HOUR_UNIT_MAX_MS in models/analyticsOperations.js: a graph of up to 31 days draws hourly points, so
+// every hour in that window needs its own bucket or each day's views would pile into a single spike.
+const RECENT_WINDOW_DAYS = 31;
 const RECENT_WINDOW_MS = RECENT_WINDOW_DAYS * DAY_MS;
 const MIN_PUBLICATION_GAP_MS = 3 * DAY_MS;
 const MAX_EXTRA_GAP_MS = 2 * DAY_MS;
@@ -115,7 +118,6 @@ const INSERT_BATCH_SIZE = 2000;
 
 function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function minuteAlign(date) { return new Date(Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS); }
-function escapeRegExp(text) { return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function chunk(array, size) {
   const chunks = [];
   for (let i = 0; i < array.length; i += size) chunks.push(array.slice(i, i + size));
@@ -184,7 +186,7 @@ function jitteredViews(expectedViews) {
   return Math.max(1, Math.round(expectedViews * rand(JITTER_MIN_PERCENT, JITTER_MAX_PERCENT) / 100));
 }
 
-// One row per hour for the last RECENT_WINDOW_DAYS days (so the default graph is dense) and one per day before that.
+// One row per hour for the last RECENT_WINDOW_DAYS days (so the 7- and 30-day graphs are dense) and one per day before that.
 // Every publication segment runs at the article's base rate times its own multiplier, which makes each update a visible step.
 function buildViewBuckets(articleId, events, now, baseRate = BASE_VIEWS_PER_HOUR.min) {
   const recentStart = minuteAlign(new Date(now - RECENT_WINDOW_MS)).getTime();

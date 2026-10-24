@@ -7,6 +7,8 @@ const GuestCommentLimit = require('../models/GuestCommentLimit');
 const WINDOW_MS = 60000;
 const MAX_COMMENTS = 3;
 const MAX_RETRIES = 20;
+const RETRY_STEP_MS = 5;
+const RETRY_MAX_DELAY_MS = 50;
 
 function publicComment(comment) {
   return {
@@ -62,7 +64,7 @@ async function createGuestComment({ articleId, displayName, body, deviceId, cloc
     } catch (error) {
       if (!retryable(error) || attempt === MAX_RETRIES - 1) throw error;
       // Duplicate-key races occur when several transactions create a device row at once.
-      await new Promise(resolve => setTimeout(resolve, Math.min(5 * (attempt + 1), 50)));
+      await new Promise(resolve => setTimeout(resolve, Math.min(RETRY_STEP_MS * (attempt + 1), RETRY_MAX_DELAY_MS)));
     } finally {
       await session.endSession();
     }
@@ -77,4 +79,38 @@ async function createAuthenticatedComment({ articleId, body, user }) {
   return { kind: 'created', comment: publicComment(comment) };
 }
 
-module.exports = { publicComment, publishedArticleExists, createGuestComment, createAuthenticatedComment };
+/** Newest first, one page at a time. `cursor` is { at, id } of the last comment already sent. Returns the rows and whether more remain. */
+async function listForArticle(articleId, { cursor, limit }) {
+  const query = { article: articleId };
+  if (cursor) query.$or = [
+    { createdAt: { $lt: cursor.at } },
+    { createdAt: cursor.at, _id: { $lt: cursor.id } }
+  ];
+  const rows = await Comment.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean();
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+/** Every comment of an article, oldest first, in the public shape; used by the server-rendered article page. */
+async function listForArticlePage(articleId) {
+  const rows = await Comment.find({ article: articleId })
+    .select('article displayName body createdAt')
+    .sort({ createdAt: 1, _id: 1 }).lean();
+  return rows.map(publicComment);
+}
+
+function findById(id) {
+  return Comment.findById(id).lean();
+}
+
+function updateBody(id, body) {
+  return Comment.findByIdAndUpdate(id, { $set: { body } }, { returnDocument: 'after', runValidators: true });
+}
+
+function deleteById(id) {
+  return Comment.findByIdAndDelete(id);
+}
+
+module.exports = {
+  publicComment, publishedArticleExists, createGuestComment, createAuthenticatedComment,
+  listForArticle, listForArticlePage, findById, updateBody, deleteById
+};

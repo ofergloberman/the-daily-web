@@ -47,14 +47,14 @@ test('every bucket belongs to the publication that was current at that time', ()
   }
 });
 
-test('the last seven days always contain hourly data, even for an article published weeks ago', () => {
+test('the last 31 days always contain hourly data, even for an article published weeks ago', () => {
   const buckets = buildViewBuckets(new ObjectId(), eventsAgo(44), NOW);
   const recent = buckets.filter(bucket => NOW - bucket.minute.getTime() <= RECENT_WINDOW_MS);
   assert.equal(recent.length, RECENT_WINDOW_MS / HOUR_MS);
   recent.forEach((bucket, i) => {
     if (i > 0) assert.equal(bucket.minute.getTime() - recent[i - 1].minute.getTime(), HOUR_MS, 'no gaps between hourly buckets');
   });
-  assert.ok(buckets.length < 300, 'older history is one row per day, keeping the seed small');
+  assert.ok(buckets.length <= RECENT_WINDOW_MS / HOUR_MS + DAYS_BACK, 'older history is one row per day, keeping the seed small');
 });
 
 test('an article published a moment ago still gets a bucket', () => {
