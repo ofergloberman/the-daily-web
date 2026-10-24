@@ -15,8 +15,6 @@ The Daily Web is a news website built for the Web Application Development course
 - **Impact analytics:** Editors see article views over time on an HTML canvas, with markers at each approved update.
 - **Demo data:** `npm run seed:demo` creates 520 articles, Reporters, an Editor, comments, and weeks of view history.
 
-The Developer 4 hand-off document, with the demo script, code walkthrough and pre-defense checklist for the Editor desk and analytics, is in [README.dev4-analytics-and-editor-review.md](README.dev4-analytics-and-editor-review.md).
-
 ## Installation and startup
 
 Node.js 22 or later and a transaction-capable MongoDB replica set or compatible MongoDB Atlas deployment are required for the comments API and atomic guest limiter. A standalone MongoDB server is insufficient. The server checks transaction support at startup, and you can run the same check on its own with `node --env-file=.env scripts/verifyTransactions.js`. A local single-node replica set works: start `mongod --replSet rs0 --port 27018 --dbpath <folder>` and run `rs.initiate()` once in `mongosh --port 27018`.
