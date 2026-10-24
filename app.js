@@ -5,10 +5,11 @@ const { connectDatabase } = require('./config/database');
 const { loadUser, requireReporter, requireEditor } = require('./middleware/auth');
 const { deviceIdentity } = require('./middleware/deviceIdentity');
 const { showHome } = require('./controllers/publicArticleController');
-const { formatDate } = require('./helpers/dates');
+const { formatDate, SITE_TIME_ZONE } = require('./helpers/dates');
 const { applicationOrigin, csrfProtection } = require('./middleware/csrf');
 const { sendError } = require('./helpers/sendError');
 
+const SHUTDOWN_TIMEOUT_MS = 10000;
 // Logs only what is needed to trace a failure: never the body, cookies, query string or the error object.
 function logRequestFailure(req, status, error) {
   console.error('Request failed:', req.method, req.path, status, error.name);
@@ -39,6 +40,7 @@ app.disable('x-powered-by');
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.locals.formatDate = formatDate;
+app.locals.siteTimeZone = SITE_TIME_ZONE;
 app.use(csrfProtection);
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
@@ -72,7 +74,7 @@ async function start() {
     process.exitCode = 1;
   });
   function shutdown() {
-    const timeout = setTimeout(() => process.exit(1), 10000);
+    const timeout = setTimeout(() => process.exit(1), SHUTDOWN_TIMEOUT_MS);
     timeout.unref();
     server.close(async () => { await mongoose.disconnect(); clearTimeout(timeout); });
   }

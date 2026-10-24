@@ -140,6 +140,15 @@ test('Reporter article routes enforce role, ownership, state transitions and fie
 
   // Ownership: another Reporter cannot reach this article by changing the id.
   assert.equal((await fetch(`${base}/reporter/articles/${articleId}/edit`, { headers: headers(tokens.b) })).status, 404);
+  // A browser opening someone else's article gets the error page with a way back, not raw JSON.
+  const browserHeaders = { ...headers(tokens.b), Accept: 'text/html' };
+  const foreign = await fetch(`${base}/reporter/articles/${articleId}/edit`, { headers: browserHeaders });
+  assert.equal(foreign.status, 404);
+  assert.match(foreign.headers.get('content-type'), /text\/html/);
+  assert.match(await foreign.text(), /href="\/reporter"[^>]*>Back to my articles/);
+  const badPage = await fetch(`${base}/reporter?page=bad`, { headers: { ...headers(tokens.a), Accept: 'text/html' } });
+  assert.equal(badPage.status, 400);
+  assert.match(badPage.headers.get('content-type'), /text\/html/);
   assert.equal((await fetch(`${base}/reporter/articles/${articleId}/edit`, { headers: headers(tokens.a) })).status, 200);
   assert.equal((await patch(tokens.b, articleId, withVersion(full))).status, 404);
   assert.equal((await patch(tokens.a, 'bad-id', withVersion(full))).status, 404);

@@ -1,5 +1,4 @@
-// Article domain contract (Developer 2). See docs/ARTICLE_CONTRACT.md for the
-// narrative version of everything below.
+// Article domain contract (Developer 2): the rules below are the single source of truth for article state changes.
 //
 // The model-layer workflow coordinates database operations across Article,
 // PublicationEvent, Comment, and ViewStatistic. Controllers remain
@@ -204,6 +203,19 @@ function listOwnArticlesQuery(user, { status } = {}) {
 }
 
 /**
+ * One page of the Reporter/Editor's article list, newest edit first. Fetches one extra row to learn whether a next page exists.
+ * @param {{id: string, role: string}} user
+ * @param {{ status?: string, page: number, pageSize: number }} options
+ * @returns {Promise<{ articles: object[], hasNext: boolean }>}
+ */
+async function listOwnArticlesPage(user, { status, page, pageSize }) {
+  const rows = await listOwnArticlesQuery(user, status ? { status } : {})
+    .select('draft.title status editorNote updatedAt').sort({ updatedAt: -1, _id: -1 })
+    .skip((page - 1) * pageSize).limit(pageSize + 1).lean();
+  return { articles: rows.slice(0, pageSize), hasNext: rows.length > pageSize };
+}
+
+/**
  * Autosave. Writes only DRAFT_EDITABLE_FIELDS keys present in `patch`; any
  * other key is ignored. Throws WorkflowError('DRAFT_LOCKED') while
  * `status === 'pending'`. Requires `patch.baseVersion` to equal the
@@ -349,8 +361,7 @@ async function returnForCorrections(articleId, user, note) {
  * check (submitForApproval already enforces this) since editAsEditor can
  * change `draft.imageUrl` while an article is pending, after submission's
  * check already ran.
- * Transactional: requires a replica-set MongoDB connection (see
- * docs/ARTICLE_CONTRACT.md §7). The write that flips status away from
+ * Transactional: requires a replica-set MongoDB connection. The write that flips status away from
  * `pending` is conditional on the status still being `pending`, so a racing
  * duplicate approval sees no match and fails instead of creating a second event.
  * @param {string} articleId
@@ -428,6 +439,7 @@ module.exports = {
   createDraft,
   getOwnArticle,
   listOwnArticlesQuery,
+  listOwnArticlesPage,
   saveDraftContent,
   submitForApproval,
   editAsEditor,

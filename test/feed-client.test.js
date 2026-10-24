@@ -50,6 +50,7 @@ function serverCard(id, category = '') {
 function page({ cursor = 'cursor-1', fetch, navigation = 'navigate', cards = [], viewed = 'all', search = '', stored = null }) {
   const feed = node('section');
   feed.dataset.nextCursor = cursor;
+  feed.dataset.timeZone = 'Asia/Jerusalem';
   feed.append(...cards);
   const form = node('form');
   form.q = node('input'); form.category = node('select'); form.sort = node('select'); form.viewed = node('select');

@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
-const Comment = require('../models/Comment');
 const comments = require('../services/comments');
+const { COMMENT_BODY_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } = require('../config/constants');
 
 const PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
+const CURSOR_MAX_LENGTH = 200;
 
 function validId(value) {
   return typeof value === 'string' && /^[a-f\d]{24}$/i.test(value) && mongoose.isValidObjectId(value);
@@ -17,7 +18,7 @@ function trimmed(value, max) {
 
 function parseCursor(value) {
   if (value === undefined) return null;
-  if (typeof value !== 'string' || value.length > 200 || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
+  if (typeof value !== 'string' || value.length > CURSOR_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
   try {
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
     if (!validId(parsed.id) || typeof parsed.at !== 'string' ||
@@ -40,14 +41,8 @@ async function list(req, res, next) {
   }
   try {
     if (!await comments.publishedArticleExists(articleId)) return res.status(404).json({ error: 'ARTICLE_NOT_FOUND' });
-    const query = { article: articleId };
-    if (cursor) query.$or = [
-      { createdAt: { $lt: cursor.at } },
-      { createdAt: cursor.at, _id: { $lt: cursor.id } }
-    ];
-    const rows = await Comment.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean();
-    const page = rows.slice(0, limit);
-    res.json({ comments: page.map(comments.publicComment), nextCursor: rows.length > limit ? cursorFor(page.at(-1)) : null });
+    const { rows, hasMore } = await comments.listForArticle(articleId, { cursor, limit });
+    res.json({ comments: rows.map(comments.publicComment), nextCursor: hasMore ? cursorFor(rows.at(-1)) : null });
   } catch (error) { next(error); }
 }
 
@@ -57,9 +52,13 @@ async function create(req, res, next) {
       Object.keys(req.body).some(key => !['articleId', 'displayName', 'body'].includes(key))) {
     return res.status(400).json({ error: 'INVALID_COMMENT' });
   }
-  const body = trimmed(req.body?.body, 2000);
-  const displayName = req.user ? trimmed(req.user.displayName, 100) : trimmed(req.body?.displayName, 100);
+  const body = trimmed(req.body?.body, COMMENT_BODY_MAX_LENGTH);
+  const displayName = req.user ? trimmed(req.user.displayName, DISPLAY_NAME_MAX_LENGTH) : trimmed(req.body?.displayName, DISPLAY_NAME_MAX_LENGTH);
   if (!validId(articleId) || !body || !displayName) return res.status(400).json({ error: 'INVALID_COMMENT' });
+  // A guest without a device cookie gets a fresh id on every request, which would bypass the per-device limit.
+  if (!req.user && req.deviceIsNew) {
+    return res.status(400).json({ error: 'DEVICE_REQUIRED', message: 'Please reload the page and try again.' });
+  }
   try {
     const outcome = req.user
       ? await comments.createAuthenticatedComment({ articleId, body, user: req.user })
@@ -85,7 +84,7 @@ async function create(req, res, next) {
 async function read(req, res, next) {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
   try {
-    const comment = await Comment.findById(req.params.id).lean();
+    const comment = await comments.findById(req.params.id);
     if (!comment || !await comments.publishedArticleExists(comment.article)) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
     res.json({ comment: comments.publicComment(comment) });
   } catch (error) { next(error); }
@@ -93,10 +92,10 @@ async function read(req, res, next) {
 
 async function update(req, res, next) {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
-  const body = trimmed(req.body?.body, 2000);
+  const body = trimmed(req.body?.body, COMMENT_BODY_MAX_LENGTH);
   if (!body || Object.keys(req.body).some(key => key !== 'body')) return res.status(400).json({ error: 'INVALID_COMMENT' });
   try {
-    const comment = await Comment.findByIdAndUpdate(req.params.id, { $set: { body } }, { returnDocument: 'after', runValidators: true });
+    const comment = await comments.updateBody(req.params.id, body);
     if (!comment) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
     res.json({ comment: comments.publicComment(comment) });
   } catch (error) { next(error); }
@@ -105,7 +104,7 @@ async function update(req, res, next) {
 async function remove(req, res, next) {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'INVALID_COMMENT_ID' });
   try {
-    const deleted = await Comment.findByIdAndDelete(req.params.id);
+    const deleted = await comments.deleteById(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'COMMENT_NOT_FOUND' });
     res.status(204).end();
   } catch (error) { next(error); }

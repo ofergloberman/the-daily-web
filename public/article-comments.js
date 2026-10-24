@@ -24,7 +24,7 @@
     const time = document.createElement('time');
     time.dateTime = comment.createdAt;
     time.textContent = new Intl.DateTimeFormat('en-US', {
-      dateStyle: 'long', timeZone: 'Asia/Jerusalem'
+      dateStyle: 'long', timeZone: section.dataset.timeZone
     }).format(new Date(comment.createdAt));
     const text = document.createElement('p');
     text.className = 'comment-body';
@@ -64,6 +64,8 @@
           announce('You can post three comments per minute.' +
             (Number.isFinite(seconds) && seconds > 0
               ? ` Please try again in ${Math.ceil(seconds)} seconds.` : ' Please try again shortly.'), true);
+        } else if (response.status === 400 && data.error === 'DEVICE_REQUIRED') {
+          announce('Please reload the page and make sure cookies are enabled, then try again.', true);
         } else if (response.status === 400) {
           announce('Check your name (1–100 characters) and comment (1–2,000 characters), then try again.', true);
         } else if (response.status === 404) {

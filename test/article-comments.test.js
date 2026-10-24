@@ -37,7 +37,7 @@ function browser(fetch) {
     setAttribute() {}, removeAttribute() {}
   };
   const section = {
-    dataset: { articleId: 'article-id' },
+    dataset: { articleId: 'article-id', timeZone: 'Asia/Jerusalem' },
     querySelector: selector => ({ form, '[data-comment-list]': list,
       '[data-comments-empty]': empty, '[data-comment-message]': message })[selector]
   };
@@ -109,6 +109,13 @@ test('validation, 429, server and network errors retain input and existing list'
       assert.match(ui.message.textContent, status === 429 ? /12 seconds/ : /Check|kept/);
     });
   }
+});
+
+test('a missing device cookie tells the guest to reload and keeps the input', async () => {
+  const ui = browser(async () => ({ ok: false, status: 400, json: async () => ({ error: 'DEVICE_REQUIRED' }) }));
+  await ui.submit();
+  assert.equal(ui.body.value, 'My comment');
+  assert.match(ui.message.textContent, /reload the page/);
 });
 
 test('whitespace validation makes no request; edits during submission survive success', async () => {

@@ -27,7 +27,7 @@ test('models reject invalid roles, statuses and empty comments; drafts stay sepa
   await assert.rejects(comment.validate(), error => Boolean(error.errors.body));
 });
 
-test('HTTP foundation renders, exposes remaining placeholders and handles invalid requests', async (t) => {
+test('HTTP foundation renders, exposes no public article write endpoints and handles invalid requests', async (t) => {
   mockEmptyFeed(t);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
@@ -39,6 +39,10 @@ test('HTTP foundation renders, exposes remaining placeholders and handles invali
   assert.equal((await fetch(`${base}/auth`)).status, 200);
   assert.equal((await fetch(`${base}/comments`)).status, 400);
   assert.equal((await fetch(`${base}/missing`)).status, 404);
+  const articleId = new mongoose.Types.ObjectId();
+  for (const [path, method] of [['/articles', 'POST'], [`/articles/${articleId}`, 'PATCH'], [`/articles/${articleId}`, 'DELETE']]) {
+    assert.equal((await fetch(base + path, { method, headers: { Origin: base } })).status, 404, `${method} ${path}`);
+  }
   const invalid = await fetch(`${base}/auth/login`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{' });
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).error, 'INVALID_JSON');

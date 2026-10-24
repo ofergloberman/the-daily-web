@@ -4,6 +4,10 @@ const Session = require('./Session');
 const Article = require('./Article');
 const Comment = require('./Comment');
 const PublicationEvent = require('./PublicationEvent');
+const {
+  PASSWORD_LENGTH, USERNAME_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH, USER_LIST_LIMIT_MAX, USER_LIST_OFFSET_MAX
+} = require('../config/constants');
+const { escapeRegExp } = require('../helpers/escapeRegExp');
 
 class MaintenanceError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -16,7 +20,7 @@ function fields(value, allowed) {
 function username(value) {
   if (typeof value !== 'string') invalid('Username must be text.');
   const result = value.trim().toLowerCase();
-  if (!result || result.length > 50 || /[\s\p{Cc}]/u.test(result)) invalid('Username must be 1–50 characters without whitespace or controls.');
+  if (!result || result.length > USERNAME_MAX_LENGTH || /[\s\p{Cc}]/u.test(result)) invalid(`Username must be 1–${USERNAME_MAX_LENGTH} characters without whitespace or controls.`);
   return result;
 }
 function profile(input, creating = false) {
@@ -26,7 +30,9 @@ function profile(input, creating = false) {
   if (creating || Object.hasOwn(input, 'username')) result.username = username(input.username);
   if (creating || Object.hasOwn(input, 'displayName')) {
     if (typeof input.displayName !== 'string' || !input.displayName.trim() ||
-        input.displayName.trim().length > 100 || /\p{Cc}/u.test(input.displayName)) invalid('Display name must be 1–100 characters without controls.');
+        input.displayName.trim().length > DISPLAY_NAME_MAX_LENGTH || /\p{Cc}/u.test(input.displayName)) {
+      invalid(`Display name must be 1–${DISPLAY_NAME_MAX_LENGTH} characters without controls.`);
+    }
     result.displayName = input.displayName.trim();
   }
   if (creating || Object.hasOwn(input, 'role')) {
@@ -61,9 +67,11 @@ async function findUser(query, session) {
   return user;
 }
 function passwordInput(password) {
-  if (typeof password !== 'string' || password.length < 8 || password.length > 128) invalid('Password must be 8–128 characters.');
+  if (typeof password !== 'string' || password.length < PASSWORD_LENGTH.min || password.length > PASSWORD_LENGTH.max) {
+    invalid(`Password must be ${PASSWORD_LENGTH.min}–${PASSWORD_LENGTH.max} characters.`);
+  }
 }
-// Caller must stop application/seed writers; see USER_MAINTENANCE.md.
+// Caller must stop application/seed writers.
 async function createUser(input, password) {
   const data = profile(input, true);
   passwordInput(password);
@@ -81,10 +89,12 @@ async function readUser(input) {
 async function listUsers(options = {}) {
   fields(options, ['search', 'limit', 'offset']);
   const { search = '', limit = 20, offset = 0 } = options;
-  if (typeof search !== 'string' || search.length > 50 || /\p{Cc}/u.test(search)) invalid('Search must be at most 50 characters without controls.');
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 10000) invalid('Limit must be 1–100; offset must be 0–10000.');
+  if (typeof search !== 'string' || search.length > USERNAME_MAX_LENGTH || /\p{Cc}/u.test(search)) invalid(`Search must be at most ${USERNAME_MAX_LENGTH} characters without controls.`);
+  if (!Number.isInteger(limit) || limit < 1 || limit > USER_LIST_LIMIT_MAX || !Number.isInteger(offset) || offset < 0 || offset > USER_LIST_OFFSET_MAX) {
+    invalid(`Limit must be 1–${USER_LIST_LIMIT_MAX}; offset must be 0–${USER_LIST_OFFSET_MAX}.`);
+  }
   // Literal prefix search uses the username index; input cannot inject regex operators.
-  const escaped = search.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = escapeRegExp(search.trim().toLowerCase());
   return safeOperation(async () => (await User.find(escaped ? { username: { $regex: `^${escaped}` } } : {})
     .sort({ username: 1 }).skip(offset).limit(limit)).map(safeUser));
 }

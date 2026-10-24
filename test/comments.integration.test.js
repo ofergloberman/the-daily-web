@@ -90,6 +90,16 @@ test('comments API and atomic limiter against real MongoDB', { skip: !uri && 'Se
   assert.equal(String((await Comment.findById(auth.data.comment.id)).author), String(reporter._id));
   for (let i = 0; i < 3; i += 1) assert.equal((await post(first._id, guestDevice, {}, sessionToken)).status, 201);
 
+  const withoutDevice = headers => fetch(`${base}/comments`, {
+    method: 'POST',
+    headers: { Origin: base, 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ articleId: String(first._id), displayName: 'Guest', body: 'No device cookie' })
+  });
+  const noDeviceGuest = await withoutDevice({});
+  assert.equal(noDeviceGuest.status, 400);
+  assert.equal((await noDeviceGuest.json()).error, 'DEVICE_REQUIRED');
+  assert.equal((await withoutDevice({ Cookie: `wd_session=${sessionToken}` })).status, 201);
+
   assert.equal((await post(second._id, guestDevice)).status, 201);
   assert.equal((await post(first._id, guestDevice)).status, 201);
   const limited = await post(second._id, guestDevice);

@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 const { randomBytes, scrypt: scryptCallback, timingSafeEqual } = require('node:crypto');
 const { promisify } = require('node:util');
-const { ROLES, PASSWORD_LENGTH } = require('../config/constants');
+const { ROLES, PASSWORD_LENGTH, USERNAME_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } = require('../config/constants');
 const scrypt = promisify(scryptCallback);
 
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true, trim: true, lowercase: true, maxlength: 50 },
-  displayName: { type: String, required: true, trim: true, maxlength: 100 },
+  username: { type: String, required: true, unique: true, trim: true, lowercase: true, maxlength: USERNAME_MAX_LENGTH },
+  displayName: { type: String, required: true, trim: true, maxlength: DISPLAY_NAME_MAX_LENGTH },
   passwordHash: {
     type: String, required: true, select: false,
     validate: { validator: value => /^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/.test(value), message: 'Use setPassword to create a password hash.' }
