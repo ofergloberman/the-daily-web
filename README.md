@@ -26,7 +26,7 @@ Copy-Item .env.example .env
 
 Set `MONGODB_URI` in `.env` to your transaction-capable database connection string. The example file uses a local replica set on port 27018. The personal `.env` file is excluded from Git. Never share passwords or a connection string that contains credentials.
 
-Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer; requests missing both are rejected. Forms and AJAX calls from the app's own pages send the Origin header automatically; behind a proxy, `APP_ORIGIN` must be the public origin the browser sees (`middleware/csrf.js`).
+Set `APP_ORIGIN` to the browser's exact origin, by default `http://localhost:3000`. Production requires an explicit HTTPS origin. All mutations require matching Origin or Referer, and a `Sec-Fetch-Site: cross-site` request is rejected even when Origin matches; requests missing both Origin and Referer are rejected. Forms and AJAX calls from the app's own pages send the Origin header automatically; behind a proxy, `APP_ORIGIN` must be the public origin the browser sees (`middleware/csrf.js`).
 
 ```powershell
 npm run dev
@@ -46,7 +46,7 @@ npm run create-user -- reporter1 'Reporter One' reporter --offline
 
 Use `editor` as the final argument for an Editor account. Choose a unique username. Sign in at `http://localhost:3000/auth`. Form login redirects Reporters to `/reporter`, where they can create and edit drafts, and Editors to `/editor`, where they browse all articles, review submissions, and open `/analytics`. The current account creation script is for local setup, so do not put real passwords in commands, source files, or `.env`.
 
-Full local account CRUD is available through `npm run users -- <command>` (run it without a command to see the usage text). Deleting an account is refused while it still owns articles, comments, or publication events, and `NEW_USER_PASSWORD` is no longer read.
+Full local account CRUD is available through `npm run users -- <command>` (`create`, `read`, `list`, `update`, `reset-password`, `delete`; run it without a command to see the usage text). Every command except `read`/`list` requires `--offline` and must be run with the application and seed scripts stopped. Deleting an account is refused while it still owns articles, comments, or publication events; `reset-password`, `delete` and a role change revoke the user's existing sessions. Passwords are prompted for privately and never logged. `NEW_USER_PASSWORD` is no longer read.
 
 ## Project structure
 
@@ -220,7 +220,7 @@ On 5000 articles every feed page reads 21 documents through an index, with no co
 
 ## Git and submitting
 
-The project lives in the GitHub repository `ofergloberman/the-daily-web`. `.gitignore` excludes `.env`, `node_modules`, and temporary files, so secrets are never committed. Work on a separate branch and merge through Pull Requests.
+The project is hosted on the team's public GitHub repository (github.com/ofergloberman/the-daily-web), with every team member added as a collaborator. `.gitignore` excludes `.env`, `node_modules`, and temporary files, so secrets are never committed. Each team member works on a separate `devN/feature-name` branch and merges changes into `dev` through Pull Requests.
 
 To create the submission archive from the committed files only (no `.env`, no `node_modules`):
 

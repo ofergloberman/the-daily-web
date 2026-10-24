@@ -73,6 +73,7 @@ async function create(req, res, next) {
       });
     }
     console.info('Comment created:', outcome.comment.id);
+    if (req.is('application/x-www-form-urlencoded')) return res.redirect(303, `/articles/${articleId}#comments`);
     res.status(201).json({ comment: outcome.comment });
   } catch (error) {
     if (error.name === 'ValidationError' || error.name === 'CastError') return res.status(400).json({ error: 'INVALID_COMMENT' });

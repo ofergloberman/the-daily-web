@@ -2,7 +2,7 @@
 async function verifyTransactions(connection) {
   const hello = await connection.db.admin().command({ hello: 1 });
   if ((!hello.setName && hello.msg !== 'isdbgrid') || hello.logicalSessionTimeoutMinutes == null) {
-    throw new Error('MongoDB transactions require a replica set or a compatible sharded deployment. See the README, "Installation and startup".');
+    throw new Error('MongoDB transactions require a replica set or a compatible sharded deployment. See the Installation and startup section of README.md.');
   }
 
   const collection = connection.db.collection('transaction_probes');
