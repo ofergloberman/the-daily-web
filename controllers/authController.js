@@ -1,7 +1,7 @@
 const { randomBytes } = require('node:crypto');
 const User = require('../models/User');
 const Session = require('../models/Session');
-const { ROLES } = require('../config/constants');
+const { ROLES, USERNAME_MAX_LENGTH } = require('../config/constants');
 const { COOKIE_NAME, hashToken, readSessionToken } = require('../middleware/auth');
 
 const SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -23,7 +23,7 @@ async function login(req, res, next) {
   try {
     const { username, password } = req.body || {};
     const form = req.is('application/x-www-form-urlencoded');
-    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || username.length > 50 || !password) {
+    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || username.length > USERNAME_MAX_LENGTH || !password) {
       if (form) return res.status(400).render('login', { error: 'Enter a username and password.' });
       return res.status(400).json({ error: 'INVALID_INPUT' });
     }

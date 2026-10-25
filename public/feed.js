@@ -9,7 +9,7 @@
 
   const SEARCH_DELAY_MS = 300;
   const PRELOAD_PX = 600;
-  const dateFormat = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Jerusalem' });
+  const dateFormat = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: feed.dataset.timeZone });
   // failed stops automatic loading after an error until the reader retries or changes the filters.
   // applied is what the feed currently shows; the form can be ahead of it while the reader is still typing.
   const state = { cursor: feed.dataset.nextCursor || null, loading: false, failed: false, generation: 0, controller: null, seen: new Set(), applied: null, search: location.search, typing: false };

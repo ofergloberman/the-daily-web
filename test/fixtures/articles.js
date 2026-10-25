@@ -8,8 +8,8 @@
 // and in integration/seed scripts (spread into whatever insert call you use).
 //
 // Every field defaults to something valid and submission-ready; override only
-// what your test actually cares about. See docs/ARTICLE_CONTRACT.md §1 for
-// the status machine these shapes must stay consistent with.
+// what your test actually cares about. The shapes must stay consistent with the
+// status machine in config/constants.js (ARTICLE_TRANSITIONS).
 const mongoose = require('mongoose');
 
 const DEFAULT_CONTENT = Object.freeze({

@@ -9,6 +9,8 @@
   const backLink = document.getElementById('back-link');
   const fields = ['title', 'summary', 'body', 'category', 'imageUrl'];
   const requiredForSubmit = ['title', 'summary', 'body', 'category'];
+  const TYPING_PAUSE_MS = 800;
+  const RETRY_INTERVAL_MS = 5000;
   let version = 0;
   let savedVersion = 0;
   // The draftVersion this editor last saw - sent as `baseVersion` with every
@@ -181,7 +183,7 @@
     if (!halted()) setStatus('Unsaved changes', 'dirty');
     updateSubmitAvailability();
     clearTimeout(timer);
-    timer = setTimeout(save, 800);
+    timer = setTimeout(save, TYPING_PAUSE_MS);
   });
   retry.addEventListener('click', () => save());
   if (submitButton) submitButton.addEventListener('click', submit);
@@ -202,7 +204,7 @@
       }
     });
   }
-  setInterval(() => { if (version > savedVersion && !saving && !halted()) save(); }, 5000);
+  setInterval(() => { if (version > savedVersion && !saving && !halted()) save(); }, RETRY_INTERVAL_MS);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden' && version !== savedVersion && !halted()) save();
   });

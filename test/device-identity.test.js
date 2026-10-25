@@ -19,8 +19,14 @@ function identify(cookie) {
   deviceIdentity(req, { cookie: (...args) => cookies.push(args) }, () => { nextCalls += 1; });
   assert.equal(nextCalls, 1);
   assert.match(req.deviceId, /^[a-f0-9]{64}$/);
-  return { id: req.deviceId, cookies };
+  return { id: req.deviceId, cookies, isNew: req.deviceIsNew };
 }
+
+test('deviceIsNew is true only when a new cookie was just issued', () => {
+  assert.equal(identify().isNew, true);
+  assert.equal(identify('wd_device=bad').isNew, true);
+  assert.equal(identify(`wd_device=${'a'.repeat(64)}`).isNew, false);
+});
 
 test('missing cookies create distinct 32-byte device identities', () => {
   const first = identify();
@@ -89,4 +95,21 @@ test('application mounts device identity before homepage, article, and comment h
     const reused = await fetch(base + path, { method, headers: { Origin: process.env.APP_ORIGIN, Cookie: cookie.split(';')[0] } });
     assert.equal(reused.headers.getSetCookie().some(value => value.startsWith('wd_device=')), false);
   }
+});
+
+test('guest comment without a device cookie is rejected before any database work', async t => {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const previousOrigin = process.env.APP_ORIGIN;
+  t.after(() => { if (previousOrigin === undefined) delete process.env.APP_ORIGIN; else process.env.APP_ORIGIN = previousOrigin; });
+  process.env.APP_ORIGIN = base;
+  const response = await fetch(`${base}/comments`, {
+    method: 'POST',
+    headers: { Origin: base, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ articleId: 'a'.repeat(24), displayName: 'Guest', body: 'Hello' })
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, 'DEVICE_REQUIRED');
 });

@@ -1,6 +1,7 @@
 const MAX_AGE_MS = 15 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
 const BACKOFF_MS = 60 * 1000;
+const PROVIDER_TIMEOUT_MS = 5000;
 const WEATHER_CODES = new Set([0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99]);
 const UNAVAILABLE = Object.freeze({ status: 'unavailable', message: 'Weather is temporarily unavailable.' });
 
@@ -43,7 +44,7 @@ function createWeatherService({ env = process.env, fetchProvider = (...args) => 
         timer = schedule(() => {
           controller.abort();
           reject(new Error('Weather timeout'));
-        }, 5000);
+        }, PROVIDER_TIMEOUT_MS);
       });
       const payload = await Promise.race([timeout, (async () => {
         const response = await fetchProvider(url, { signal: controller.signal });
